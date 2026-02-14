@@ -92,8 +92,6 @@ struct ChunkList: Sendable {
 
     var count: Int { cachedCount }
 
-    var isEmpty: Bool { cachedCount == 0 }
-
     func forEach(_ body: (Item) throws -> Void) rethrows {
         for ci in 0..<frozen.count {
             let chunk = frozen[ci]
@@ -104,21 +102,6 @@ struct ChunkList: Sendable {
         for i in 0..<tailSnapshot.count {
             try body(tailSnapshot[i])
         }
-    }
-
-    func map<T>(_ transform: (Item) throws -> T) rethrows -> [T] {
-        var result: [T] = []
-        result.reserveCapacity(cachedCount)
-        for ci in 0..<frozen.count {
-            let chunk = frozen[ci]
-            for i in 0..<chunk.count {
-                result.append(try transform(chunk[i]))
-            }
-        }
-        for i in 0..<tailSnapshot.count {
-            result.append(try transform(tailSnapshot[i]))
-        }
-        return result
     }
 
     subscript(index: Int) -> Item? {

@@ -31,10 +31,6 @@ package actor ItemCache {
         store.totalCount
     }
 
-    func isEmpty() -> Bool {
-        store.totalCount == 0
-    }
-
     /// Return an O(1) snapshot of the current items.
     /// The snapshot shares frozen chunks with the live store (zero copy);
     /// only the current tail chunk (~2.4 KB) is copied.

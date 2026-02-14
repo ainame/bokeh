@@ -20,11 +20,6 @@ struct Chunk: Sendable {
         count >= Self.capacity
     }
 
-    var items: [Item] {
-        // Only return valid items (0..<count)
-        (0..<count).map { storage[$0] }
-    }
-
     /// Direct subscript access without array allocation
     subscript(index: Int) -> Item {
         get {
