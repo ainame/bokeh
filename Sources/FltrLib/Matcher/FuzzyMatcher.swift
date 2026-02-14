@@ -26,7 +26,7 @@ public enum SortScheme: Sendable {
 public struct FuzzyMatcher: Sendable {
     let caseSensitive: Bool
     let scheme: SortScheme
-    private let backend: any MatcherBackend
+    private let backend: FuzzyMatchBackend
 
     public init(caseSensitive: Bool = false, scheme: SortScheme = .path) {
         self.caseSensitive = caseSensitive

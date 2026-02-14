@@ -15,17 +15,7 @@ public final class MatcherScratch: @unchecked Sendable {
     public init() {}
 }
 
-/// Swappable backend contract for fuzzy matching engines.
-protocol MatcherBackend: Sendable {
-    func prepare(_ pattern: String, caseSensitive: Bool) -> PreparedPattern
-    func makeScratch() -> MatcherScratch
-    func matchRank(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, scratch: MatcherScratch) -> RankMatch?
-    func matchHighlight(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, scratch: MatcherScratch) -> MatchResult?
-    func match(pattern: String, text: String, caseSensitive: Bool) -> MatchResult?
-    func match(pattern: String, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> MatchResult?
-}
-
-struct FuzzyMatchBackend: MatcherBackend {
+struct FuzzyMatchBackend: Sendable {
     // We delegate tokenization/AND semantics to Fltr's FuzzyMatcher layer.
     private let matcher = FuzzyMatch.FuzzyMatcher(
         config: FuzzyMatch.MatchConfig(minScore: 0.0, algorithm: .smithWaterman())
