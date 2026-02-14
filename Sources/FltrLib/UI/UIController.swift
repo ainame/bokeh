@@ -91,7 +91,8 @@ actor UIController {
         await render()
 
         var lastRefresh = Date()
-        let refreshInterval: TimeInterval = 0.1  // Refresh every 100ms when new items arrive
+        let refreshIntervalFast: TimeInterval = 0.02
+        let refreshIntervalSlow: TimeInterval = 0.1
 
         // Debounced matching runs OUTSIDE the actor so it never blocks input.
         // Each iteration waits for the previous match to finish (so that
@@ -145,6 +146,9 @@ actor UIController {
 
                 if currentCount > lastItemCount {
                     let now = Date()
+                    // Keep perceived latency low for small/medium streams while
+                    // retaining conservative throttling for very large feeds.
+                    let refreshInterval = currentCount < 10_000 ? refreshIntervalFast : refreshIntervalSlow
                     if now.timeIntervalSince(lastRefresh) >= refreshInterval {
                         lastItemCount = currentCount
                         state.totalItems = currentCount
@@ -177,8 +181,8 @@ actor UIController {
 
                 // Brief sleep to reduce CPU usage when no input available
                 // Terminal readByte already has 100ms timeout, so combined we check
-                // for updates approximately every 110ms when idle
-                try? await Task.sleep(for: .milliseconds(10))
+                // for updates approximately every 105ms when idle
+                try? await Task.sleep(for: .milliseconds(5))
             }
         }
 
