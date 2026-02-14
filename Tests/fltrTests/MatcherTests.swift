@@ -198,30 +198,6 @@ func emptyPatternMatchesAll() {
     #expect(results.count == 3)
 }
 
-// MARK: - Character Classification Tests
-
-@Test("Character classification")
-func characterClassification() {
-    #expect(CharClass.classify(" ") == .whitespace)
-    #expect(CharClass.classify("_") == .delimiter)
-    #expect(CharClass.classify("-") == .delimiter)
-    #expect(CharClass.classify("a") == .lower)
-    #expect(CharClass.classify("A") == .upper)
-    #expect(CharClass.classify("1") == .number)
-}
-
-@Test("Bonus calculation for character positions")
-func bonusCalculation() {
-    // After whitespace should give high bonus
-    #expect(CharClass.bonus(current: .lower, previous: .whitespace) == 8)
-
-    // After delimiter should give medium bonus
-    #expect(CharClass.bonus(current: .lower, previous: .delimiter) == 7)
-
-    // CamelCase transition (lower to upper)
-    #expect(CharClass.bonus(current: .upper, previous: .lower) == 7)
-}
-
 // MARK: - Whitespace Semantics Tests
 
 @Test("Whitespace is handled by backend semantics")

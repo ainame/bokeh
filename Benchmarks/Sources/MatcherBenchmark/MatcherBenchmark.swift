@@ -1,7 +1,7 @@
 import Foundation
 import FltrLib
 
-/// Benchmark comparing Character-based (FuzzyMatchV2) vs Fltr matcher backend matching.
+/// Benchmark for the Fltr matcher backend.
 /// Dataset expanded to cover realistic file-path lengths and query patterns that
 /// exercise different DP window sizes and selectivity levels.
 public struct MatcherBenchmark {
@@ -120,22 +120,12 @@ public struct MatcherBenchmark {
     }
 
     public static func runComparison() {
-        print("=== Matcher Performance Comparison ===")
+        print("=== Matcher Performance Benchmark ===")
         print("  Dataset: \(testData.count) items × \(queries.count) queries\n")
 
-        let timeCharacter = benchmark(name: "Character-based (FuzzyMatchV2)") { pattern, text in
-            FuzzyMatchV2.match(pattern: pattern, text: text, caseSensitive: false)
-        }
-
-        print()
-
         let backendMatcher = FuzzyMatcher(caseSensitive: false, scheme: .path)
-        let timeUtf8 = benchmark(name: "Fltr backend (fuzzymatch)") { pattern, text in
+        _ = benchmark(name: "Fltr backend (fuzzymatch)") { pattern, text in
             backendMatcher.match(pattern: pattern, text: text)
         }
-
-        print()
-        print("=== Summary ===")
-        print("Speedup (Backend vs Character): \(String(format: "%.2f", timeCharacter / timeUtf8))x")
     }
 }
