@@ -7,7 +7,7 @@ import Glibc
 import Musl
 #endif
 
-/// Reads items from stdin using raw ``fread`` — no per-line ``String`` allocation.
+/// Reads items from stdin using raw ``read(2)`` — no per-line ``String`` allocation.
 ///
 /// A 64 KB reusable read buffer is filled in a loop.  Lines are delimited by
 /// ``0x0A`` (``\n``).  Whitespace is trimmed by byte-scanning both ends.
@@ -34,7 +34,7 @@ actor StdinReader {
 
         isReading = true
 
-        // Task.detached: the fread loop blocks an OS thread; keep it off the
+        // Task.detached: the read loop blocks an OS thread; keep it off the
         // cooperative pool so it cannot starve Swift concurrency.
         return Task.detached {
             await StdinReader.readLoop(cache: self.cache)
@@ -54,10 +54,14 @@ actor StdinReader {
 
         while true {
             let n = buf.withUnsafeMutableBufferPointer { ptr in
-                fread(ptr.baseAddress! + carry, 1, chunkSize - carry, stdin)
+                read(STDIN_FILENO, ptr.baseAddress! + carry, chunkSize - carry)
             }
-            if n == 0 { break }             // EOF (or error)
-            let total = carry + n
+            if n == 0 { break }             // EOF
+            if n < 0 {
+                if errno == EINTR { continue }
+                break
+            }
+            let total = carry + Int(n)
 
             var lineStart = 0
             for i in 0..<total {
