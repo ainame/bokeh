@@ -148,7 +148,7 @@ cat words.txt | fltr --case-sensitive
 
 ## Requirements
 
-- macOS 26+ or Linux
+- macOS 14+ or Linux
 - Terminal with ANSI color support
 
 ## Development
@@ -169,7 +169,7 @@ Built with Swift 6.2 using:
 - Actors for safe concurrency
 - Parallel matching across CPU cores
 - [FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) Smith-Waterman scoring
-- SIMD-optimized byte scanning (memchr) for 12–21% faster matching
+- Byte-level match position recovery for ranking/highlight paths
 - Streaming stdin reader
 - Incremental filtering for fast typing
 
