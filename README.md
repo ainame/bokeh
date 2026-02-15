@@ -61,7 +61,7 @@ Type to filter, use arrows to navigate, press Enter to select.
 - **Multi-select** - Pick multiple items with Tab (`-m` flag)
 - **Preview windows** - See file contents as you browse
 - **FuzzyMatch-powered scoring** - Uses [ordo-one/FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) (Smith-Waterman)
-- **Unicode support** - Handles emoji, CJK characters correctly
+- **Unicode support** - Handles emoji/CJK rendering and keeps IME candidate UI anchored to the input caret
 
 ## Usage Examples
 
