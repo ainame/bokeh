@@ -109,7 +109,7 @@ Raw Input → UIController.handleKey()
 
 ### UI Features
 
-- **Input field with cursor**: Visual block cursor showing current position
+- **Input field with cursor**: Visual block cursor showing current position; terminal cursor is anchored to the caret so IME candidate UI appears at the input position
 - **Emacs-like key bindings**:
   - Ctrl-A: Beginning of line
   - Ctrl-E: End of line

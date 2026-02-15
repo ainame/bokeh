@@ -13,6 +13,7 @@ DeclarativeTUI provides a declarative, composable API for building TUI applicati
 - **Chainable modifiers** - `.bold()`, `.foregroundColor()`, etc.
 - **Type safety** - All views are checked at compile time
 - **Sendable conformance** - Safe for Swift 6 concurrency
+- **Unicode/IME-friendly rendering** - Handles emoji/CJK text and keeps IME candidate UI anchored to the input caret
 
 ## Quick Start
 
