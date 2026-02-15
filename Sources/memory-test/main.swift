@@ -37,9 +37,8 @@ func currentRSSMB() -> Double {
 func log(_ msg: String) {
     var m = msg + "\n"
     m.withUTF8 { buf in
-        _ = fwrite(buf.baseAddress!, 1, buf.count, stderr)
+        _ = write(STDERR_FILENO, buf.baseAddress!, buf.count)
     }
-    fflush(stderr)
 }
 
 // MARK: - Main
