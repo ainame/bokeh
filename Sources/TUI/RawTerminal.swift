@@ -194,7 +194,7 @@ public actor RawTerminal: Terminal {
         if let fd = ttyFd {
             fsync(fd.rawValue)
         } else {
-            fflush(stdout)
+            fsync(FileDescriptor.standardOutput.rawValue)
         }
     }
 
