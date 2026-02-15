@@ -53,8 +53,16 @@ actor StdinReader {
         let textBuffer = cache.buffer       // capture once; reference type
 
         while true {
+            // A single line can exceed the default 64 KB chunk.
+            // Grow the buffer before reading so we never issue read(..., 0),
+            // which would look like EOF and truncate remaining stdin.
+            if carry == buf.count {
+                buf.append(contentsOf: repeatElement(0, count: buf.count))
+            }
+
+            let available = buf.count - carry
             let n = buf.withUnsafeMutableBufferPointer { ptr in
-                read(STDIN_FILENO, ptr.baseAddress! + carry, chunkSize - carry)
+                read(STDIN_FILENO, ptr.baseAddress! + carry, available)
             }
             if n == 0 { break }             // EOF
             if n < 0 {
