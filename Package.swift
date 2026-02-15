@@ -68,7 +68,7 @@ let package = Package(
         .executableTarget(
             name: "memory-test",
             dependencies: ["FltrLib"],
-            path: "Sources/memory-test"
+            path: "Benchmarks/Sources/MemoryTest"
         ),
 
         // Tests
