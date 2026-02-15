@@ -11,6 +11,11 @@ import DisplayWidth
 public struct TextRenderer {
     private static let displayWidth = DisplayWidth()
 
+    /// Returns visual display width in terminal cells.
+    public static func visualWidth(_ text: String) -> Int {
+        displayWidth(text)
+    }
+
     /// Truncates text to fit specified width, considering Unicode display width and ANSI codes.
     ///
     /// ANSI escape sequences are preserved and don't count toward visual width.
@@ -68,7 +73,7 @@ public struct TextRenderer {
     ///   - width: Target visual width
     /// - Returns: Padded text
     public static func pad(_ text: String, width: Int) -> String {
-        let currentWidth = displayWidth(text)
+        let currentWidth = visualWidth(text)
         if currentWidth >= width {
             return truncate(text, width: width)
         }

@@ -75,6 +75,10 @@ struct UIRenderer: Sendable {
             spinnerFrame: context.spinnerFrame
         )
 
+        // Keep terminal cursor anchored to the prompt caret position.
+        // IME candidate UI follows the terminal cursor location.
+        frame += inputCursorAnchor(query: state.query, cursorPosition: state.cursorPosition, cols: cols)
+
         return frame
     }
 
@@ -203,6 +207,15 @@ struct UIRenderer: Sendable {
             width: cols
         )
         return Self.statusBar.render(config: config)
+    }
+
+    private func inputCursorAnchor(query: String, cursorPosition: Int, cols: Int) -> String {
+        let prompt = "> "
+        let availableWidth = max(0, cols - prompt.count - 1)
+        let prefix = String(query.prefix(max(0, min(cursorPosition, query.count))))
+        let prefixWidth = min(availableWidth, TextRenderer.visualWidth(prefix))
+        let col = min(cols, max(1, prompt.count + 1 + prefixWidth))
+        return ANSIColors.moveCursor(row: 1, col: col)
     }
 }
 
