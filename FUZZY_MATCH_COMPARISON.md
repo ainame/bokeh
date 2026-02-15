@@ -9,58 +9,42 @@ This comparison uses the same corpus and query set from `FuzzyMatch/Resources`:
 
 Throughput and quality were measured for:
 
-- **FuzzyMatch (Edit Distance)** via `FuzzyMatch/Comparison/run-benchmarks.sh --fm-ed`
-- **fltr** via new harnesses added in this repo:
-  - `comparison-bench-fltr` (throughput)
-  - `comparison-quality-fltr` (quality)
+- **FuzzyMatch (Edit Distance)** (`FuzzyMatch(ED)`)
+- **FuzzyMatch (Smith-Waterman)** (`FuzzyMatch(SW)`)
+- **fltr** (current benchmark wrapper run used `--fltr-matcher swfast`)
+- Reference tools in the same run: `nucleo`, `fzf` (quality only)
 
 ## Throughput
 
 ### Commands
 
 ```bash
-# FuzzyMatch ED throughput
-bash FuzzyMatch/Comparison/run-benchmarks.sh --fm-ed --iterations 5
-
-# fltr throughput
-swift run -c release --package-path Benchmarks comparison-bench-fltr \
-  --tsv FuzzyMatch/Resources/instruments-export.tsv \
-  --queries FuzzyMatch/Resources/queries.tsv \
-  --iterations 5
+# End-to-end throughput + quality (includes FM ED/SW, fltr, nucleo, fzf)
+scripts/fuzzy_match_benchmark.sh --iterations 1 --fm-mode both --fltr-matcher swfast
 ```
 
 ### Results
 
 | Tool | Median total time (197 queries) | Throughput (median) | Per-query average |
 |---|---:|---:|---:|
-| FuzzyMatch (ED) | 3134.0 ms | 17M candidates/sec | 15.91 ms |
-| fltr (Utf8FuzzyMatch harness) | 2571.8 ms | 21M candidates/sec | 13.06 ms |
+| fltr(swfast) | 4198.0 ms | 13M candidates/sec | 21.31 ms |
+| FuzzyMatch (ED) | 3019.8 ms | 18M candidates/sec | 15.33 ms |
+| FuzzyMatch (SW) | 1578.8 ms | 34M candidates/sec | 8.01 ms |
+| nucleo | 917.9 ms | 58M candidates/sec | 4.66 ms |
 
 Relative throughput:
 
-- `fltr` is about **1.24x faster** than FuzzyMatch(ED) on this run (`21M / 17M`).
-- Median total time improved by about **18.0%** (`3134.0ms -> 2571.8ms`).
+- `FuzzyMatch(SW)` is about **2.66x faster** than `fltr(swfast)` (`4198.0 / 1578.8`).
+- `FuzzyMatch(ED)` is about **1.39x faster** than `fltr(swfast)` (`4198.0 / 3019.8`).
+- `nucleo` is fastest in this run at **4.57x** vs `fltr(swfast)` (`4198.0 / 917.9`).
 
 ## Filtering Quality
 
 ### Commands
 
 ```bash
-# Build FuzzyMatch quality harness
-(cd FuzzyMatch/Comparison/quality-fuzzymatch && swift build -c release)
-
-# Prepare stdin query stream (query + field)
-awk -F'\t' '{print $1"\t"$2}' FuzzyMatch/Resources/queries.tsv > /tmp/quality-queries-input.tsv
-
-# Run quality outputs
-cat /tmp/quality-queries-input.tsv \
-  | FuzzyMatch/Comparison/quality-fuzzymatch/.build/arm64-apple-macosx/release/quality-fuzzymatch \
-    FuzzyMatch/Resources/instruments-export.tsv \
-  > /tmp/quality-fuzzymatch-ed.tsv
-
-cat /tmp/quality-queries-input.tsv \
-  | swift run -c release --package-path Benchmarks comparison-quality-fltr FuzzyMatch/Resources/instruments-export.tsv \
-  > /tmp/quality-fltr.tsv
+# End-to-end quality (includes FM ED/SW, fltr, nucleo, fzf)
+scripts/fuzzy_match_benchmark.sh --no-throughput --fm-mode both --fltr-matcher swfast
 ```
 
 Ground-truth evaluation follows `FuzzyMatch/Comparison/run-quality.py` logic:
@@ -73,40 +57,50 @@ Ground-truth evaluation follows `FuzzyMatch/Comparison/run-quality.py` logic:
 
 Coverage:
 
+- fltr(swfast): results for **190/197** queries
 - FuzzyMatch(ED): results for **197/197** queries
-- fltr harness: results for **190/197** queries
+- FuzzyMatch(SW): results for **187/197** queries
+- nucleo: results for **190/197** queries
+- fzf: results for **186/197** queries
 
 Ground-truth hits (evaluated queries with expected answer: 152):
 
+- fltr(swfast): **128/152 (84.2%)**
 - FuzzyMatch(ED): **150/152 (98.7%)**
-- fltr harness: **128/152 (84.2%)**
+- FuzzyMatch(SW): **129/152 (84.9%)**
+- nucleo: **121/152 (79.6%)**
+- fzf: **126/152 (82.9%)**
 
-Top-1 agreement between FuzzyMatch(ED) and fltr:
+Top-1 agreement:
 
-- **147/197 (74.6%)**
+- FuzzyMatch(ED) vs fltr(swfast): **147/197 (74.6%)**
+- FuzzyMatch(SW) vs fltr(swfast): **95/197 (48.2%)**
 
 Per-category ground-truth highlights:
 
-| Category | FuzzyMatch(ED) | fltr |
-|---|---:|---:|
-| exact_name | 35/35 | 34/35 |
-| exact_isin | 6/6 | 6/6 |
-| prefix (top-5) | 21/21 | 21/21 |
-| typo (top-5) | 41/41 | 24/41 |
-| substring | 22/22 | 22/22 |
-| multi_word | 15/15 | 15/15 |
-| abbreviation (top-5) | 10/12 | 6/12 |
+| Category | FuzzyMatch(ED) | FuzzyMatch(SW) | fltr(swfast) |
+|---|---:|---:|---:|
+| exact_name | 35/35 | 35/35 | 34/35 |
+| exact_isin | 6/6 | 6/6 | 6/6 |
+| prefix (top-5) | 21/21 | 16/21 | 21/21 |
+| typo (top-5) | 41/41 | 23/41 | 24/41 |
+| substring | 22/22 | 22/22 | 22/22 |
+| multi_word | 15/15 | 15/15 | 15/15 |
+| abbreviation (top-5) | 10/12 | 12/12 | 6/12 |
 
 ## Interpretation
 
-- On this corpus, the `fltr` matcher path used in this harness is **faster** than FuzzyMatch(ED).
-- FuzzyMatch(ED) has **better typo and abbreviation quality**, which dominates its ground-truth lead.
-- `fltr` is strong on exact/prefix/substring/multi-word, but loses quality on typo-heavy queries.
+- On this run, `fltr(swfast)` is **slower** than both FuzzyMatch matchers in throughput.
+- `FuzzyMatch(SW)` is much faster than `FuzzyMatch(ED)`, but quality differs by category:
+  - stronger on abbreviations,
+  - weaker on prefix/typo.
+- `FuzzyMatch(ED)` remains the strongest overall quality baseline on this dataset.
+- `fltr(swfast)` is close to `FuzzyMatch(SW)` in aggregate GT hit rate (84.2% vs 84.9%), but with different failure modes.
 
 ## Notes on Fairness
 
 - Both throughput harnesses include top-K heap maintenance (K=100) and per-query preparation inside timed loops.
-- Current `fltr` quality harness uses public `Utf8FuzzyMatch` token-AND scoring with score/length/index ranking.
+- Current `fltr` quality harness uses public matcher backend selection (`--matcher utf8|swfast`) with score/length/index ranking.
 - This is close to `fltr` internals but not a full UI/controller path benchmark.
 
 ## How to Add fltr to FuzzyMatch Comparison Suite
