@@ -26,7 +26,11 @@ func currentRSSMB() -> Double {
     }
     #endif
     var usage = rusage()
-    getrusage(RUSAGE_SELF, &usage)
+    #if canImport(Darwin)
+    _ = getrusage(RUSAGE_SELF, &usage)
+    #else
+    _ = getrusage(__rusage_who_t(RUSAGE_SELF.rawValue), &usage)
+    #endif
     #if canImport(Darwin)
     return Double(usage.ru_maxrss) / (1024.0 * 1024.0)
     #else
