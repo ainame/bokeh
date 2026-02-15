@@ -347,6 +347,17 @@ func whitespaceAtomsMatchFormValidationCandidate() {
     #expect(!(highlight?.positions.isEmpty ?? true))
 }
 
+@Test("Multi-term highlight prefers contiguous term spans")
+func multiTermContiguousHighlight() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "gist.github.com/ainame/career"
+    let (rank, highlight) = matchRankAndHighlight(matcher: matcher, query: "ai career", text: text)
+
+    #expect(rank != nil)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [16, 17, 23, 24, 25, 26, 27, 28] as [UInt16])
+}
+
 // MARK: - Blackbox Integration Tests
 
 @Test("Realistic file path matching - exact matches score highest")

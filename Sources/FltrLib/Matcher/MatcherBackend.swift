@@ -101,9 +101,9 @@ struct FuzzyMatchBackend: Sendable {
         return (b >= 0x41 && b <= 0x5A) ? (b | 0x20) : b
     }
 
-    /// Selects match positions for rank/highlight with minimal local logic:
-    /// FuzzyMatch decides match/no-match and score; this only recovers highlight
-    /// indices using a greedy subsequence walk over the prepared bytes.
+    /// Selects match positions for rank/highlight:
+    /// FuzzyMatch decides match/no-match and score; this recovers highlight
+    /// indices by preferring contiguous atom matches, then greedy fallback.
     private func matchPositions(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
         let pattern = prepared.lowercasedBytes
         guard !pattern.isEmpty else { return [] }
@@ -120,7 +120,7 @@ struct FuzzyMatchBackend: Sendable {
                 for atom in prepared.atomRanges {
                     guard atom.length <= textBuf.count else { return nil }
                     let atomBuf = UnsafeBufferPointer(start: base + atom.start, count: atom.length)
-                    guard let atomPositions = greedyMatchPositions(
+                    guard let atomPositions = matchSinglePatternPositions(
                         patternBuf: atomBuf,
                         textBuf: textBuf,
                         caseSensitive: caseSensitive
@@ -145,8 +145,46 @@ struct FuzzyMatchBackend: Sendable {
 
         guard pattern.count <= textBuf.count else { return nil }
         return pattern.withUnsafeBufferPointer { patternBuf in
-            greedyMatchPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
+            matchSinglePatternPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
         }
+    }
+
+    private func matchSinglePatternPositions(
+        patternBuf: UnsafeBufferPointer<UInt8>,
+        textBuf: UnsafeBufferPointer<UInt8>,
+        caseSensitive: Bool
+    ) -> [UInt16]? {
+        guard !patternBuf.isEmpty else { return [] }
+        guard patternBuf.count <= textBuf.count else { return nil }
+
+        if let start = findContiguousSubstringStart(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive) {
+            return (0..<patternBuf.count).map { UInt16(clamping: start + $0) }
+        }
+        return greedyMatchPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
+    }
+
+    private func findContiguousSubstringStart(
+        patternBuf: UnsafeBufferPointer<UInt8>,
+        textBuf: UnsafeBufferPointer<UInt8>,
+        caseSensitive: Bool
+    ) -> Int? {
+        let pLen = patternBuf.count
+        let tLen = textBuf.count
+        guard pLen > 0, pLen <= tLen else { return nil }
+
+        for start in 0...(tLen - pLen) {
+            var isMatch = true
+            for i in 0..<pLen {
+                let tb = folded(textBuf[start + i], caseSensitive: caseSensitive)
+                let pb = folded(patternBuf[i], caseSensitive: caseSensitive)
+                if tb != pb {
+                    isMatch = false
+                    break
+                }
+            }
+            if isMatch { return start }
+        }
+        return nil
     }
 
     private func greedyMatchPositions(patternBuf: UnsafeBufferPointer<UInt8>, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
