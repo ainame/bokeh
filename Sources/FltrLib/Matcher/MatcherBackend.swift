@@ -108,9 +108,12 @@ struct FuzzyMatchBackend: Sendable {
         guard !pattern.isEmpty else { return [] }
         guard pattern.count <= textBuf.count else { return nil }
 
+        // Prefer exact contiguous spans for highlight/minBegin when available.
+        // This prevents scattered greedy picks (e.g. letters matched across path segments).
         if let start = findContiguousSubstringStart(pattern: pattern, textBuf: textBuf, caseSensitive: caseSensitive) {
             return (0..<pattern.count).map { UInt16(clamping: start + $0) }
         }
+        // Fall back to classic fuzzy subsequence positions when exact span doesn't exist.
         return greedyMatchPositions(pattern: pattern, textBuf: textBuf, caseSensitive: caseSensitive)
     }
 
@@ -127,6 +130,8 @@ struct FuzzyMatchBackend: Sendable {
         for start in 0...(tLen - pLen) {
             var isMatch = true
             for i in 0..<pLen {
+                // Reuse the same ASCII case-folding logic as matching, so rank/highlight
+                // position recovery honors case-sensitive vs insensitive mode consistently.
                 let tb = folded(textBuf[start + i], caseSensitive: caseSensitive)
                 let pb = folded(pattern[i], caseSensitive: caseSensitive)
                 if tb != pb {
@@ -139,6 +144,8 @@ struct FuzzyMatchBackend: Sendable {
             if firstMatch == nil {
                 firstMatch = start
             }
+            // Prefer token-like matches (word/path boundaries on both sides),
+            // but remember the first contiguous hit as a stable fallback.
             if isWholeWordMatch(start: start, length: pLen, textBuf: textBuf) {
                 return start
             }
@@ -151,6 +158,8 @@ struct FuzzyMatchBackend: Sendable {
     private func isWholeWordMatch(start: Int, length: Int, textBuf: UnsafeBufferPointer<UInt8>) -> Bool {
         let end = start + length
 
+        // Boundary rule: either edge of string, or adjacent byte is non-alnum.
+        // This treats separators such as '/', '_', '-', '.', and spaces as boundaries.
         let startBoundary = start == 0 || !isASCIIAlnum(textBuf[start - 1])
         let endBoundary = end >= textBuf.count || !isASCIIAlnum(textBuf[end])
         return startBoundary && endBoundary
