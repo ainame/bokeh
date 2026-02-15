@@ -15,12 +15,34 @@ git branch | fltr
 
 ## Installation
 
+### Local install (host platform)
+
 ```bash
 git clone <repository-url>
 cd fltr
 swift build -c release
 cp .build/release/fltr /usr/local/bin/
 ```
+
+### Build Linux static binary (musl + Static Linux SDK)
+
+`make linux` builds `fltr` for Linux using the Swift Static Linux SDK and links `mimalloc` statically.
+
+```bash
+git clone <repository-url>
+cd fltr
+
+# Build for default target (aarch64)
+make linux
+
+# Build for x86_64
+ARCH=x86_64 make linux
+
+# Override mimalloc version if needed
+MIMALLOC_VERSION=3.0.10 make linux
+```
+
+Before running `make linux`, ensure the Swift Static Linux SDK is installed/configured in your Swift toolchain.
 
 ## Quick Start
 
