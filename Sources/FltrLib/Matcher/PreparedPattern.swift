@@ -13,6 +13,11 @@
 /// }
 /// ```
 public struct PreparedPattern: Sendable {
+    public struct AtomRange: Sendable {
+        public let start: Int
+        public let length: Int
+    }
+
     /// Original pattern string (kept for display and debugging)
     public let original: String
 
@@ -22,6 +27,10 @@ public struct PreparedPattern: Sendable {
 
     /// Whether case-sensitive matching was requested.
     public let caseSensitive: Bool
+
+    /// Query atoms split on ASCII spaces, matching upstream Smith-Waterman
+    /// splitSpaces behavior (drop empty segments between repeated spaces).
+    public let atomRanges: [AtomRange]
 
     /// Create a prepared pattern from a query string.
     ///
@@ -34,6 +43,29 @@ public struct PreparedPattern: Sendable {
 
         // Pre-lowercase the entire pattern for case-insensitive matching
         let lowercased = caseSensitive ? pattern : pattern.lowercased()
-        self.lowercasedBytes = Array(lowercased.utf8)
+        let bytes = Array(lowercased.utf8)
+        self.lowercasedBytes = bytes
+        self.atomRanges = Self.computeAtomRanges(bytes)
+    }
+
+    private static func computeAtomRanges(_ bytes: [UInt8]) -> [AtomRange] {
+        guard bytes.contains(0x20) else { return [] }
+
+        var ranges: [AtomRange] = []
+        var segStart = 0
+
+        for i in 0..<bytes.count {
+            if bytes[i] == 0x20 {
+                if i > segStart {
+                    ranges.append(AtomRange(start: segStart, length: i - segStart))
+                }
+                segStart = i + 1
+            }
+        }
+
+        if bytes.count > segStart {
+            ranges.append(AtomRange(start: segStart, length: bytes.count - segStart))
+        }
+        return ranges
     }
 }

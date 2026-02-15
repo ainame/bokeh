@@ -245,9 +245,10 @@ func emptyPatternMatchesAll() {
 func whitespaceBackendSemantics() {
     let matcher = FuzzyMatcher()
 
-    // No fltr-side token split; this is delegated to upstream matcher behavior.
-    #expect(matcher.match(pattern: "swift util", text: "swift-argument-parser/Tools/changelog-authors/Util.swift") == nil)
+    // Smith-Waterman splitSpaces=true: "swift util" is two atoms with AND semantics.
+    #expect(matcher.match(pattern: "swift util", text: "swift-argument-parser/Tools/changelog-authors/Util.swift") != nil)
     #expect(matcher.match(pattern: "swift util", text: "swift util") != nil)
+    #expect(matcher.match(pattern: "swift util", text: "swift-only") == nil)
 }
 
 @Test("Whitespace query over multiple items follows backend semantics")
@@ -263,17 +264,17 @@ func whitespaceBackendOrdering() {
 
     let results = matchItems(matcher: matcher, pattern: "swift util", set: set)
 
-    #expect(results.count >= 1)
+    #expect(results.count >= 2)
     #expect(results.contains { set.text(of: $0.item) == "swift util tools" })
-    #expect(!results.contains { set.text(of: $0.item) == "swift-util-tools" })
+    #expect(results.contains { set.text(of: $0.item) == "swift-util-tools" })
 }
 
-@Test("Multiple spaces are not tokenized by fltr")
+@Test("Multiple spaces use backend split-space semantics")
 func multipleWhitespaceTokens() {
     let matcher = FuzzyMatcher()
 
     #expect(matcher.match(pattern: "swift arg parser", text: "swift arg parser") != nil)
-    #expect(matcher.match(pattern: "swift arg parser", text: "swift-argument-parser") == nil)
+    #expect(matcher.match(pattern: "swift arg parser", text: "swift-argument-parser") != nil)
     #expect(matcher.match(pattern: "swift arg xyz", text: "swift-argument-parser") == nil)
 }
 
@@ -284,7 +285,7 @@ func whitespaceTrimmingAndEmpty() {
     #expect(matcher.match(pattern: "  swift  ", text: "swift-file") == nil)
     #expect(matcher.match(pattern: "  swift  ", text: "  swift  ") != nil)
 
-    #expect(matcher.match(pattern: "swift  util", text: "swift-util") == nil)
+    #expect(matcher.match(pattern: "swift  util", text: "swift-util") != nil)
     #expect(matcher.match(pattern: "swift  util", text: "swift  util") != nil)
 
     // Whitespace-only query is no longer interpreted as empty query by fltr.
@@ -293,10 +294,10 @@ func whitespaceTrimmingAndEmpty() {
     #expect(results.count == 0)
 }
 
-@Test("FuzzyMatch backend no longer enforces fltr AND semantics")
+@Test("FuzzyMatch backend enforces AND semantics for multi-word queries")
 func fuzzyMatchBackendWhitespaceSemantics() {
     let matcher = FuzzyMatcher()
-    #expect(matcher.match(pattern: "abc def", text: "xxabc_yydef_zz") == nil)
+    #expect(matcher.match(pattern: "abc def", text: "xxabc_yydef_zz") != nil)
     #expect(matcher.match(pattern: "abc def", text: "abc def") != nil)
     #expect(matcher.match(pattern: "abc def", text: "xxabc_only_zz") == nil)
     #expect(matcher.match(pattern: "abc def", text: "yydef_only_zz") == nil)
@@ -316,12 +317,25 @@ func fuzzyMatchBackendRankAndHighlightWhitespace() {
     #expect(missing.1 == nil)
 }
 
-@Test("FuzzyMatch backend treats multiple spaces literally")
+@Test("FuzzyMatch backend collapses repeated spaces between atoms")
 func fuzzyMatchBackendMultipleSpacesLiteral() {
     let matcher = FuzzyMatcher()
-    #expect(matcher.match(pattern: "abc   def", text: "abc...def") == nil)
+    #expect(matcher.match(pattern: "abc   def", text: "abc...def") != nil)
     #expect(matcher.match(pattern: "abc   def", text: "abc   def") != nil)
     #expect(matcher.match(pattern: "abc   def", text: "abc...ghi") == nil)
+}
+
+@Test("Whitespace atoms match FormValidation-style camel case candidate")
+func whitespaceAtomsMatchFormValidationCandidate() {
+    let matcher = FuzzyMatcher()
+    let text = "github.com/ainame/FormValidation"
+
+    #expect(matcher.match(pattern: "form vali", text: text) != nil)
+
+    let (rank, highlight) = matchRankAndHighlight(matcher: matcher, query: "form vali", text: text)
+    #expect(rank != nil)
+    #expect(highlight != nil)
+    #expect(!(highlight?.positions.isEmpty ?? true))
 }
 
 // MARK: - Blackbox Integration Tests
@@ -749,7 +763,8 @@ func realWorldQueryPatterns() {
 
     // Pattern: query containing whitespace follows backend semantics.
     let results2 = matchItems(matcher: matcher, pattern: "test User", set: set)
-    #expect(results2.count == 0)
+    #expect(results2.count >= 1)
+    #expect(results2.contains { set.text(of: $0.item).contains("UserControllerTest.java") })
 
     // Pattern: abbreviation
     let results3 = matchItems(matcher: matcher, pattern: "UC", set: set)
