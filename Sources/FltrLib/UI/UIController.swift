@@ -66,8 +66,7 @@ actor UIController {
         self.highlightResolver = HighlightResolver(matcher: matcher)
         self.inputHandler = InputHandler(
             multiSelect: multiSelect,
-            hasPreview: previewCommand != nil,
-            useFloatingPreview: useFloatingPreview
+            hasPreview: previewCommand != nil
         )
 
         var continuation: AsyncStream<QueryUpdate>.Continuation!
@@ -138,8 +137,8 @@ actor UIController {
                 scheduleRender()
             }
 
-            if let byte = await terminal.readByte() {
-                await handleKey(byte: byte)
+            if let key = await terminal.readInputEvent() {
+                await handleKey(key: key)
                 scheduleRender()
             } else {
                 let currentCount = await cache.count()
@@ -204,12 +203,10 @@ actor UIController {
         return state.getSelectedItems()
     }
 
-    private func handleKey(byte: UInt8) async {
+    private func handleKey(key: Key) async {
         let (rows, _) = (try? await terminal.getSize()) ?? (24, 80)
         let availableRows = rows - 4  // input + border + status + spacing
         let visibleHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
-
-        let key = await inputHandler.parseEscapeSequence(firstByte: byte, terminal: terminal)
 
         let context = InputContext(
             visibleHeight: visibleHeight,

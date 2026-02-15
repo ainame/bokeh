@@ -2,6 +2,7 @@ import TUI
 
 actor TestTerminal: Terminal {
     private var inputQueue: [UInt8] = []
+    private var decoder = InputDecoder()
     private(set) var output: String = ""
     private(set) var enteredRawMode = false
     private var size: (rows: Int, cols: Int)
@@ -30,9 +31,13 @@ actor TestTerminal: Terminal {
 
     var ttyBroken: Bool { false }
 
-    func readByte() -> UInt8? {
-        guard !inputQueue.isEmpty else { return nil }
-        return inputQueue.removeFirst()
+    func readInputEvent() -> Key? {
+        if !inputQueue.isEmpty {
+            decoder.feed(inputQueue.removeFirst())
+        } else {
+            decoder.handleTimeout()
+        }
+        return decoder.nextEvent()
     }
 
     func enqueue(bytes: [UInt8]) {

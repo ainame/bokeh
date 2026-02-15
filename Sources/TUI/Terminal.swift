@@ -4,6 +4,6 @@ public protocol Terminal: Actor {
     func getSize() throws -> (rows: Int, cols: Int)
     func write(_ string: String)
     func flush()
-    func readByte() -> UInt8?
+    func readInputEvent() -> Key?
     var ttyBroken: Bool { get }
 }

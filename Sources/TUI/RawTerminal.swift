@@ -17,6 +17,7 @@ public actor RawTerminal: Terminal {
     private var originalTermios: termios?
     private var ttyFd: FileDescriptor?
     private var isRawMode = false
+    private var inputDecoder = InputDecoder()
     public private(set) var ttyBroken = false  // set on fatal read error (EIO/EBADF)
 
     // Cleanup state that needs to be accessed from nonisolated context (protected by Mutex)
@@ -198,12 +199,24 @@ public actor RawTerminal: Terminal {
         }
     }
 
+    /// Reads terminal input and decodes semantic key events.
+    ///
+    /// Returns nil when no full event is available yet.
+    public func readInputEvent() -> Key? {
+        if let byte = readRawByte() {
+            inputDecoder.feed(byte)
+        } else {
+            inputDecoder.handleTimeout()
+        }
+        return inputDecoder.nextEvent()
+    }
+
     /// Reads a single byte from terminal input (non-blocking).
     ///
     /// - Returns: The byte read, or nil if no input is available within the VTIME window.
     ///            Sets `ttyBroken` on fatal errors (EIO, EBADF) so the caller can detect
     ///            a closed/disconnected terminal and exit cleanly.
-    public func readByte() -> UInt8? {
+    private func readRawByte() -> UInt8? {
         guard let fd = ttyFd else { return nil }
         var byte: UInt8 = 0
         do {
