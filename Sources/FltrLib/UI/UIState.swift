@@ -4,6 +4,7 @@ import Foundation
 struct UIState: Sendable {
     var query: String = ""
     var previousQuery: String = ""  // For incremental filtering optimization
+    // Grapheme-cluster index into `query` (same indexing model as `Array(query)`).
     var cursorPosition: Int = 0
     var selectedIndex: Int = 0
     var scrollOffset: Int = 0  // First visible item index
@@ -16,7 +17,7 @@ struct UIState: Sendable {
 
     mutating func addChar(_ char: Character) {
         // Insert character at cursor position
-        let index = query.index(query.startIndex, offsetBy: cursorPosition)
+        let index = cursorIndex()
         query.insert(char, at: index)
         cursorPosition += 1
     }
@@ -24,7 +25,7 @@ struct UIState: Sendable {
     mutating func deleteChar() {
         // Delete character before cursor (backspace behavior)
         guard cursorPosition > 0 else { return }
-        let index = query.index(query.startIndex, offsetBy: cursorPosition - 1)
+        let index = query.index(before: cursorIndex())
         query.remove(at: index)
         cursorPosition -= 1
     }
@@ -57,7 +58,7 @@ struct UIState: Sendable {
     mutating func deleteToEndOfLine() {
         // Delete from cursor position to end of line (Emacs Ctrl-K behavior)
         guard cursorPosition < query.count else { return }
-        let startIndex = query.index(query.startIndex, offsetBy: cursorPosition)
+        let startIndex = cursorIndex()
         query.removeSubrange(startIndex..<query.endIndex)
         // Cursor position stays the same (now at end)
     }
@@ -144,5 +145,9 @@ struct UIState: Sendable {
 
         // Return all selected items in original order (O(n) scan, only on exit)
         return merger.selectedItems(indices: selectedItems)
+    }
+
+    private func cursorIndex() -> String.Index {
+        query.index(query.startIndex, offsetBy: cursorPosition)
     }
 }

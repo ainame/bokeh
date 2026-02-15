@@ -173,6 +173,26 @@ func caseInsensitiveGreedyRecovery() {
     #expect(highlight?.positions == highlight?.positions.sorted())
 }
 
+@Test("Unicode highlight positions are character-index based")
+func unicodeHighlightPositionsUseCharacterIndices() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "あいabcうえ"
+
+    let (_, highlight) = matchRankAndHighlight(matcher: matcher, query: "abcう", text: text)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [2, 3, 4, 5] as [UInt16])
+}
+
+@Test("Unicode highlight supports Japanese-only query")
+func unicodeHighlightForJapaneseQuery() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "あいうえ"
+
+    let (_, highlight) = matchRankAndHighlight(matcher: matcher, query: "いう", text: text)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [1, 2] as [UInt16])
+}
+
 @Test("Falls back to fuzzy subsequence when no contiguous substring exists")
 func fallbackToGreedySubsequenceWithoutContiguous() {
     let matcher = FuzzyMatcher(caseSensitive: false)

@@ -36,7 +36,7 @@ struct FuzzyMatchBackend: Sendable {
             return nil
         }
 
-        guard let positions = matchPositions(prepared: prepared, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
+        guard let positions = matchPositionsForRank(prepared: prepared, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
             return nil
         }
 
@@ -51,7 +51,7 @@ struct FuzzyMatchBackend: Sendable {
             return nil
         }
 
-        guard let positions = matchPositions(prepared: prepared, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
+        guard let positions = matchPositionsForHighlight(prepared: prepared, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
             return nil
         }
 
@@ -101,10 +101,24 @@ struct FuzzyMatchBackend: Sendable {
         return (b >= 0x41 && b <= 0x5A) ? (b | 0x20) : b
     }
 
-    /// Selects match positions for rank/highlight:
-    /// FuzzyMatch decides match/no-match and score; this recovers highlight
-    /// indices by preferring contiguous atom matches, then greedy fallback.
-    private func matchPositions(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
+    /// Rank path keeps byte-oriented positions (fast ASCII hot path and stable
+    /// rank semantics for byPathname/minBegin).
+    private func matchPositionsForRank(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
+        matchPositionsByte(prepared: prepared, textBuf: textBuf, caseSensitive: caseSensitive)
+    }
+
+    /// Highlight path emits character-index positions for non-ASCII candidates
+    /// so UI highlighting aligns with grapheme traversal.
+    private func matchPositionsForHighlight(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
+        if isASCII(textBuf), prepared.lowercasedBytes.allSatisfy({ $0 < 0x80 }) {
+            return matchPositionsByte(prepared: prepared, textBuf: textBuf, caseSensitive: caseSensitive)
+        }
+        return matchPositionsUnicode(prepared: prepared, textBuf: textBuf, caseSensitive: caseSensitive)
+    }
+
+    /// Recovers byte-index positions by preferring contiguous atom matches, then
+    /// greedy fallback. This mirrors legacy behavior and stays on the hot path.
+    private func matchPositionsByte(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
         let pattern = prepared.lowercasedBytes
         guard !pattern.isEmpty else { return [] }
 
@@ -147,6 +161,46 @@ struct FuzzyMatchBackend: Sendable {
         return pattern.withUnsafeBufferPointer { patternBuf in
             matchSinglePatternPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
         }
+    }
+
+    private func matchPositionsUnicode(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
+        guard !prepared.lowercasedBytes.isEmpty else { return [] }
+
+        let rawText = String(decoding: textBuf, as: UTF8.self)
+        let normalizedText = caseSensitive ? rawText : rawText.lowercased()
+        let textChars = Array(normalizedText)
+
+        if prepared.atomRanges.count > 1 {
+            var merged: [UInt16] = []
+            merged.reserveCapacity(prepared.lowercasedBytes.count)
+
+            for atom in prepared.atomRanges {
+                let end = atom.start + atom.length
+                guard end <= prepared.lowercasedBytes.count else { return nil }
+                let atomBytes = prepared.lowercasedBytes[atom.start..<end]
+                guard let atomPattern = String(bytes: atomBytes, encoding: .utf8) else { return nil }
+                guard let atomPositions = matchSinglePatternPositionsUnicode(pattern: Array(atomPattern), text: textChars) else {
+                    return nil
+                }
+                merged.append(contentsOf: atomPositions)
+            }
+
+            guard !merged.isEmpty else { return nil }
+            merged.sort()
+            var unique: [UInt16] = []
+            unique.reserveCapacity(merged.count)
+            var previous: UInt16?
+            for p in merged where p != previous {
+                unique.append(p)
+                previous = p
+            }
+            return unique
+        }
+
+        guard let pattern = String(bytes: prepared.lowercasedBytes, encoding: .utf8) else {
+            return nil
+        }
+        return matchSinglePatternPositionsUnicode(pattern: Array(pattern), text: textChars)
     }
 
     private func matchSinglePatternPositions(
@@ -214,5 +268,64 @@ struct FuzzyMatchBackend: Sendable {
         }
 
         return positions
+    }
+
+    private func matchSinglePatternPositionsUnicode(pattern: [Character], text: [Character]) -> [UInt16]? {
+        guard !pattern.isEmpty else { return [] }
+        guard pattern.count <= text.count else { return nil }
+
+        if let start = findContiguousSubstringStartUnicode(pattern: pattern, text: text) {
+            return (0..<pattern.count).map { UInt16(clamping: start + $0) }
+        }
+        return greedyMatchPositionsUnicode(pattern: pattern, text: text)
+    }
+
+    private func findContiguousSubstringStartUnicode(pattern: [Character], text: [Character]) -> Int? {
+        let pLen = pattern.count
+        let tLen = text.count
+        guard pLen > 0, pLen <= tLen else { return nil }
+
+        for start in 0...(tLen - pLen) {
+            var isMatch = true
+            for i in 0..<pLen where text[start + i] != pattern[i] {
+                isMatch = false
+                break
+            }
+            if isMatch { return start }
+        }
+        return nil
+    }
+
+    private func greedyMatchPositionsUnicode(pattern: [Character], text: [Character]) -> [UInt16]? {
+        guard !pattern.isEmpty else { return [] }
+        guard pattern.count <= text.count else { return nil }
+
+        var positions: [UInt16] = []
+        positions.reserveCapacity(pattern.count)
+
+        var textIndex = 0
+        for p in pattern {
+            var found = false
+            while textIndex < text.count {
+                if text[textIndex] == p {
+                    positions.append(UInt16(clamping: textIndex))
+                    textIndex += 1
+                    found = true
+                    break
+                }
+                textIndex += 1
+            }
+            if !found { return nil }
+        }
+
+        return positions
+    }
+
+    @inline(__always)
+    private func isASCII(_ textBuf: UnsafeBufferPointer<UInt8>) -> Bool {
+        for b in textBuf where b >= 0x80 {
+            return false
+        }
+        return true
     }
 }
