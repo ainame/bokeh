@@ -170,7 +170,8 @@ cat words.txt | fltr --case-sensitive
 
 ## Requirements
 
-- macOS 26+ or Linux
+- macOS 26+
+- Linux support: `glibc` and `musl` (via Swift Static Linux SDK)
 - Terminal with ANSI color support
 
 ## Development
