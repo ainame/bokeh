@@ -35,7 +35,7 @@ Type to filter, use arrows to navigate, press Enter to select.
 ## Features
 
 - **Real-time fuzzy search** - Start typing to filter instantly
-- **Streaming input** - UI appears immediately, even for huge datasets
+- **Streaming input** - UI renders while input is still being read
 - **Multi-select** - Pick multiple items with Tab (`-m` flag)
 - **Preview windows** - See file contents as you browse
 - **FuzzyMatch-powered scoring** - Uses [ordo-one/FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) (Smith-Waterman)
@@ -131,7 +131,7 @@ In preview commands, use `{}` as a placeholder for the selected item:
 **Streaming large datasets:**
 ```bash
 find / -type f 2>/dev/null | fltr
-# UI appears instantly, keeps loading in background
+# Renders while stdin continues loading in the background
 ```
 
 **Whitespace behavior:**
@@ -148,7 +148,7 @@ cat words.txt | fltr --case-sensitive
 
 ## Requirements
 
-- macOS 14+ or Linux
+- macOS 26+ or Linux
 - Terminal with ANSI color support
 
 ## Development
