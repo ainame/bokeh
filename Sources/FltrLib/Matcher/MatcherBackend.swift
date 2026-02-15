@@ -36,7 +36,7 @@ struct FuzzyMatchBackend: Sendable {
             return nil
         }
 
-        guard let positions = greedyMatchPositions(pattern: prepared.lowercasedBytes, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
+        guard let positions = matchPositions(pattern: prepared.lowercasedBytes, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
             return nil
         }
 
@@ -51,7 +51,7 @@ struct FuzzyMatchBackend: Sendable {
             return nil
         }
 
-        guard let positions = greedyMatchPositions(pattern: prepared.lowercasedBytes, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
+        guard let positions = matchPositions(pattern: prepared.lowercasedBytes, textBuf: textBuf, caseSensitive: prepared.caseSensitive) else {
             return nil
         }
 
@@ -99,6 +99,68 @@ struct FuzzyMatchBackend: Sendable {
             return b
         }
         return (b >= 0x41 && b <= 0x5A) ? (b | 0x20) : b
+    }
+
+    /// Selects match positions for rank/highlight:
+    /// 1) contiguous exact substring when present (prefer word-bounded),
+    /// 2) otherwise greedy fuzzy subsequence fallback.
+    private func matchPositions(pattern: [UInt8], textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
+        guard !pattern.isEmpty else { return [] }
+        guard pattern.count <= textBuf.count else { return nil }
+
+        if let start = findContiguousSubstringStart(pattern: pattern, textBuf: textBuf, caseSensitive: caseSensitive) {
+            return (0..<pattern.count).map { UInt16(clamping: start + $0) }
+        }
+        return greedyMatchPositions(pattern: pattern, textBuf: textBuf, caseSensitive: caseSensitive)
+    }
+
+    private func findContiguousSubstringStart(
+        pattern: [UInt8],
+        textBuf: UnsafeBufferPointer<UInt8>,
+        caseSensitive: Bool
+    ) -> Int? {
+        let pLen = pattern.count
+        let tLen = textBuf.count
+        guard pLen > 0, pLen <= tLen else { return nil }
+
+        var firstMatch: Int?
+        for start in 0...(tLen - pLen) {
+            var isMatch = true
+            for i in 0..<pLen {
+                let tb = folded(textBuf[start + i], caseSensitive: caseSensitive)
+                let pb = folded(pattern[i], caseSensitive: caseSensitive)
+                if tb != pb {
+                    isMatch = false
+                    break
+                }
+            }
+            guard isMatch else { continue }
+
+            if firstMatch == nil {
+                firstMatch = start
+            }
+            if isWholeWordMatch(start: start, length: pLen, textBuf: textBuf) {
+                return start
+            }
+        }
+
+        return firstMatch
+    }
+
+    @inline(__always)
+    private func isWholeWordMatch(start: Int, length: Int, textBuf: UnsafeBufferPointer<UInt8>) -> Bool {
+        let end = start + length
+
+        let startBoundary = start == 0 || !isASCIIAlnum(textBuf[start - 1])
+        let endBoundary = end >= textBuf.count || !isASCIIAlnum(textBuf[end])
+        return startBoundary && endBoundary
+    }
+
+    @inline(__always)
+    private func isASCIIAlnum(_ b: UInt8) -> Bool {
+        (b >= 0x30 && b <= 0x39)
+            || (b >= 0x41 && b <= 0x5A)
+            || (b >= 0x61 && b <= 0x7A)
     }
 
     private func greedyMatchPositions(pattern: [UInt8], textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
