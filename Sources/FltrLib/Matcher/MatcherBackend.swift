@@ -158,15 +158,15 @@ struct FuzzyMatchBackend: Sendable {
     private func isWholeWordMatch(start: Int, length: Int, textBuf: UnsafeBufferPointer<UInt8>) -> Bool {
         let end = start + length
 
-        // Boundary rule: either edge of string, or adjacent byte is non-alnum.
+        // Boundary rule: either edge of string, or adjacent byte is non-alphanumeric.
         // This treats separators such as '/', '_', '-', '.', and spaces as boundaries.
-        let startBoundary = start == 0 || !isASCIIAlnum(textBuf[start - 1])
-        let endBoundary = end >= textBuf.count || !isASCIIAlnum(textBuf[end])
+        let startBoundary = start == 0 || !isASCIIAlphanumeric(textBuf[start - 1])
+        let endBoundary = end >= textBuf.count || !isASCIIAlphanumeric(textBuf[end])
         return startBoundary && endBoundary
     }
 
     @inline(__always)
-    private func isASCIIAlnum(_ b: UInt8) -> Bool {
+    private func isASCIIAlphanumeric(_ b: UInt8) -> Bool {
         (b >= 0x30 && b <= 0x39)
             || (b >= 0x41 && b <= 0x5A)
             || (b >= 0x61 && b <= 0x7A)
