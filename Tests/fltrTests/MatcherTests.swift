@@ -253,6 +253,12 @@ func whitespaceBackendSemantics() {
     #expect(matcher.match(pattern: "swift util", text: "swift-only") == nil)
 }
 
+@Test("Query normalizer trims and collapses whitespace for matching")
+func queryNormalizerWhitespace() {
+    #expect(QueryNormalizer.normalizeForMatching(" form  vali ") == "form vali")
+    #expect(QueryNormalizer.normalizeForMatching("   ") == "")
+}
+
 @Test("Whitespace query over multiple items follows backend semantics")
 func whitespaceBackendOrdering() {
     let matcher = FuzzyMatcher()
@@ -333,6 +339,7 @@ func whitespaceAtomsMatchFormValidationCandidate() {
     let text = "github.com/ainame/FormValidation"
 
     #expect(matcher.match(pattern: "form vali", text: text) != nil)
+    #expect(matcher.match(pattern: QueryNormalizer.normalizeForMatching("form "), text: text) != nil)
 
     let (rank, highlight) = matchRankAndHighlight(matcher: matcher, query: "form vali", text: text)
     #expect(rank != nil)

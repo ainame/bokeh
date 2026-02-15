@@ -265,7 +265,7 @@ actor UIController {
     }
 
     private func updatePreviousQuery(_ query: String) {
-        state.previousQuery = query
+        state.previousQuery = QueryNormalizer.normalizeForMatching(query)
     }
 
     private func applyMatchResults(_ results: ResultMerger) {
@@ -307,16 +307,18 @@ actor UIController {
         chunkList: ChunkList
     ) async {
         let overallStart = Date()
+        let normalizedQuery = QueryNormalizer.normalizeForMatching(query)
+        let normalizedPreviousQuery = QueryNormalizer.normalizeForMatching(previousQuery)
 
         // Incremental filtering: when the new query extends the previous one
         // the previous match set is a strict superset, so narrowing is lossless.
-        let canUseIncremental = !previousQuery.isEmpty &&
-                                query.hasPrefix(previousQuery) &&
-                                query.count > previousQuery.count
+        let canUseIncremental = !normalizedPreviousQuery.isEmpty &&
+                                normalizedQuery.hasPrefix(normalizedPreviousQuery) &&
+                                normalizedQuery.count > normalizedPreviousQuery.count
 
         // Merger cache hit — only valid on the full-search path (the
         // incremental candidate set is a subset and would differ).
-        if !canUseIncremental, let cached = await lookupMergerCache(pattern: query, itemCount: chunkList.count) {
+        if !canUseIncremental, let cached = await lookupMergerCache(pattern: normalizedQuery, itemCount: chunkList.count) {
             await applyMatchResults(cached)
             await refreshPreviewIfNeeded(results: cached)
             await render()
@@ -326,13 +328,13 @@ actor UIController {
         let matchStart = Date()
         let results: ResultMerger
         if canUseIncremental {
-            results = await engine.matchItemsParallel(pattern: query, items: merger.allItems(), buffer: textBuffer)
+            results = await engine.matchItemsParallel(pattern: normalizedQuery, items: merger.allItems(), buffer: textBuffer)
         } else {
-            results = await engine.matchChunksParallel(pattern: query, chunkList: chunkList, cache: chunkCache, buffer: textBuffer)
+            results = await engine.matchChunksParallel(pattern: normalizedQuery, chunkList: chunkList, cache: chunkCache, buffer: textBuffer)
         }
 
         logMatchTime(
-            query: query,
+            query: normalizedQuery,
             matchTime: Date().timeIntervalSince(matchStart) * 1000,
             totalTime: Date().timeIntervalSince(overallStart) * 1000,
             itemCount: chunkList.count,
@@ -340,7 +342,7 @@ actor UIController {
         )
 
         if !canUseIncremental {
-            await storeMergerCache(pattern: query, itemCount: chunkList.count, results: results)
+            await storeMergerCache(pattern: normalizedQuery, itemCount: chunkList.count, results: results)
         }
 
         await applyMatchResults(results)
@@ -432,7 +434,7 @@ actor UIController {
         highlightPositions.reserveCapacity(visibleItems.count)
         for matchedItem in visibleItems {
             highlightPositions[matchedItem.item.index] = highlightResolver.positions(
-                query: state.query,
+                query: QueryNormalizer.normalizeForMatching(state.query),
                 item: matchedItem.item,
                 textBuffer: textBuffer
             )

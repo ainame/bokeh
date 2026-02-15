@@ -29,6 +29,8 @@ public struct Runner {
     /// Non-interactive query mode: read all stdin, run the same matchChunksParallel
     /// path the interactive UI uses, and dump top results with rank points to stdout.
     public func runQuery(_ query: String) async throws {
+        let normalizedQuery = QueryNormalizer.normalizeForMatching(query)
+
         let cache = ItemCache()
         let reader = StdinReader(cache: cache)
         let readTask = await reader.startReading()
@@ -42,19 +44,19 @@ public struct Runner {
         let chunkCache = ChunkCache()
 
         let buf = cache.buffer
-        var merger = await engine.matchChunksParallel(pattern: query, chunkList: chunkList, cache: chunkCache, buffer: buf)
-        let prepared = matcher.prepare(query)
+        var merger = await engine.matchChunksParallel(pattern: normalizedQuery, chunkList: chunkList, cache: chunkCache, buffer: buf)
+        let prepared = matcher.prepare(normalizedQuery)
         var scratch = matcher.makeBuffer()
 
         let totalItems = await cache.count()
-        print("[query='\(query)' scheme=\(options.scheme) matcher=fuzzymatch results=\(merger.count)/\(totalItems)]")
+        print("[query='\(query)' normalized='\(normalizedQuery)' scheme=\(options.scheme) matcher=fuzzymatch results=\(merger.count)/\(totalItems)]")
         print("")
         let top = merger.slice(0, 30)
         buf.withBytes { allBytes in
             for (i, m) in top.enumerated() {
                 let p = m.points
                 let positions: [UInt16]
-                if query.isEmpty {
+                if normalizedQuery.isEmpty {
                     positions = []
                 } else {
                     let slice = UnsafeBufferPointer(
