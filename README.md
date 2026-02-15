@@ -38,7 +38,7 @@ Type to filter, use arrows to navigate, press Enter to select.
 - **Streaming input** - UI appears immediately, even for huge datasets
 - **Multi-select** - Pick multiple items with Tab (`-m` flag)
 - **Preview windows** - See file contents as you browse
-- **Smart matching** - "swift util" finds items with both words
+- **FuzzyMatch-powered scoring** - Uses [ordo-one/FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) (Smith-Waterman)
 - **Unicode support** - Handles emoji, CJK characters correctly
 
 ## Usage Examples
@@ -134,11 +134,11 @@ find / -type f 2>/dev/null | fltr
 # UI appears instantly, keeps loading in background
 ```
 
-**Whitespace as AND:**
+**Whitespace behavior:**
 ```bash
-# Finds items matching both "swift" AND "test"
+# Query semantics are delegated to FuzzyMatch.
+# Space-separated terms are not treated as a guaranteed AND by fltr itself.
 find . -type f | fltr
-# Type: swift test
 ```
 
 **Case-sensitive search:**
@@ -168,6 +168,7 @@ swift test
 Built with Swift 6.2 using:
 - Actors for safe concurrency
 - Parallel matching across CPU cores
+- [FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) Smith-Waterman scoring
 - SIMD-optimized byte scanning (memchr) for 12–21% faster matching
 - Streaming stdin reader
 - Incremental filtering for fast typing
