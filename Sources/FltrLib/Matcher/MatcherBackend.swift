@@ -101,11 +101,9 @@ struct FuzzyMatchBackend: Sendable {
         return (b >= 0x41 && b <= 0x5A) ? (b | 0x20) : b
     }
 
-    /// Selects match positions for rank/highlight:
-    /// - Multi-atom queries (split by spaces) are matched atom-by-atom with AND semantics.
-    /// - Single-atom/literal queries use full-pattern recovery.
-    /// 1) contiguous exact substring when present (prefer word-bounded),
-    /// 2) otherwise greedy fuzzy subsequence fallback.
+    /// Selects match positions for rank/highlight with minimal local logic:
+    /// FuzzyMatch decides match/no-match and score; this only recovers highlight
+    /// indices using a greedy subsequence walk over the prepared bytes.
     private func matchPositions(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
         let pattern = prepared.lowercasedBytes
         guard !pattern.isEmpty else { return [] }
@@ -122,7 +120,7 @@ struct FuzzyMatchBackend: Sendable {
                 for atom in prepared.atomRanges {
                     guard atom.length <= textBuf.count else { return nil }
                     let atomBuf = UnsafeBufferPointer(start: base + atom.start, count: atom.length)
-                    guard let atomPositions = matchSinglePatternPositions(
+                    guard let atomPositions = greedyMatchPositions(
                         patternBuf: atomBuf,
                         textBuf: textBuf,
                         caseSensitive: caseSensitive
@@ -147,80 +145,8 @@ struct FuzzyMatchBackend: Sendable {
 
         guard pattern.count <= textBuf.count else { return nil }
         return pattern.withUnsafeBufferPointer { patternBuf in
-            matchSinglePatternPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
+            greedyMatchPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
         }
-    }
-
-    private func matchSinglePatternPositions(
-        patternBuf: UnsafeBufferPointer<UInt8>,
-        textBuf: UnsafeBufferPointer<UInt8>,
-        caseSensitive: Bool
-    ) -> [UInt16]? {
-        guard !patternBuf.isEmpty else { return [] }
-        guard patternBuf.count <= textBuf.count else { return nil }
-
-        // Prefer exact contiguous spans for highlight/minBegin when available.
-        // This prevents scattered greedy picks (e.g. letters matched across path segments).
-        if let start = findContiguousSubstringStart(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive) {
-            return (0..<patternBuf.count).map { UInt16(clamping: start + $0) }
-        }
-        // Fall back to classic fuzzy subsequence positions when exact span doesn't exist.
-        return greedyMatchPositions(patternBuf: patternBuf, textBuf: textBuf, caseSensitive: caseSensitive)
-    }
-
-    private func findContiguousSubstringStart(
-        patternBuf: UnsafeBufferPointer<UInt8>,
-        textBuf: UnsafeBufferPointer<UInt8>,
-        caseSensitive: Bool
-    ) -> Int? {
-        let pLen = patternBuf.count
-        let tLen = textBuf.count
-        guard pLen > 0, pLen <= tLen else { return nil }
-
-        var firstMatch: Int?
-        for start in 0...(tLen - pLen) {
-            var isMatch = true
-            for i in 0..<pLen {
-                // Reuse the same ASCII case-folding logic as matching, so rank/highlight
-                // position recovery honors case-sensitive vs insensitive mode consistently.
-                let tb = folded(textBuf[start + i], caseSensitive: caseSensitive)
-                let pb = folded(patternBuf[i], caseSensitive: caseSensitive)
-                if tb != pb {
-                    isMatch = false
-                    break
-                }
-            }
-            guard isMatch else { continue }
-
-            if firstMatch == nil {
-                firstMatch = start
-            }
-            // Prefer token-like matches (word/path boundaries on both sides),
-            // but remember the first contiguous hit as a stable fallback.
-            if isWholeWordMatch(start: start, length: pLen, textBuf: textBuf) {
-                return start
-            }
-        }
-
-        return firstMatch
-    }
-
-    @inline(__always)
-    private func isWholeWordMatch(start: Int, length: Int, textBuf: UnsafeBufferPointer<UInt8>) -> Bool {
-        let end = start + length
-
-        // Boundary rule: either edge of string, or adjacent byte is non-alphanumeric.
-        // This treats separators such as '/', '_', '-', '.', and spaces as boundaries.
-        let startBoundary = start == 0 || !isASCIIAlphanumeric(textBuf[start - 1])
-        let endBoundary = end >= textBuf.count || !isASCIIAlphanumeric(textBuf[end])
-        return startBoundary && endBoundary
-    }
-
-    @inline(__always)
-    private func isASCIIAlphanumeric(_ b: UInt8) -> Bool {
-        (b >= 0x30 && b <= 0x39)
-            || (b >= 0x41 && b <= 0x5A)
-            || (b >= 0x61 && b <= 0x7A)
     }
 
     private func greedyMatchPositions(patternBuf: UnsafeBufferPointer<UInt8>, textBuf: UnsafeBufferPointer<UInt8>, caseSensitive: Bool) -> [UInt16]? {
