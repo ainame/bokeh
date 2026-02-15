@@ -140,6 +140,47 @@ func matchPositions() {
     #expect(result?.positions.contains(0) == true)
 }
 
+@Test("Exact contiguous substring is preferred for highlight positions")
+func exactContiguousSubstringHighlight() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "gist.github.com/ainame/career"
+
+    let (_, highlight) = matchRankAndHighlight(matcher: matcher, query: "career", text: text)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [23, 24, 25, 26, 27, 28] as [UInt16])
+}
+
+@Test("Rank minBegin stays consistent with highlight first position")
+func rankMinBeginMatchesHighlightStart() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "gist.github.com/ainame/career"
+
+    let (rank, highlight) = matchRankAndHighlight(matcher: matcher, query: "career", text: text)
+    #expect(rank != nil)
+    #expect(highlight != nil)
+    #expect(rank?.minBegin == highlight?.positions.first)
+}
+
+@Test("Case-insensitive contiguous recovery for exact substring")
+func caseInsensitiveContiguousRecovery() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "gist.github.com/ainame/Career"
+
+    let (_, highlight) = matchRankAndHighlight(matcher: matcher, query: "career", text: text)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [23, 24, 25, 26, 27, 28] as [UInt16])
+}
+
+@Test("Falls back to fuzzy subsequence when no contiguous substring exists")
+func fallbackToGreedySubsequenceWithoutContiguous() {
+    let matcher = FuzzyMatcher(caseSensitive: false)
+    let text = "gist.github.com/ainame/career"
+
+    let (_, highlight) = matchRankAndHighlight(matcher: matcher, query: "crr", text: text)
+    #expect(highlight != nil)
+    #expect(highlight?.positions == [12, 25, 28] as [UInt16])
+}
+
 @Test("Match scoring validation")
 func matchScoring() {
     let matcher = FuzzyMatcher()
