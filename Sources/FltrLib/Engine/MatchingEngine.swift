@@ -130,7 +130,10 @@ struct MatchingEngine: Sendable {
                             var chunkResults: [MatchedItem] = []
 
                             if let candidates = candidates {
-                                for candidate in candidates {
+                                for (candidateIndex, candidate) in candidates.enumerated() {
+                                    if candidateIndex.isMultiple(of: 64), Task.isCancelled {
+                                        return []
+                                    }
                                     let item = candidate.item
                                     let slice = UnsafeBufferPointer(
                                         start: allBytes.baseAddress! + Int(item.offset),
@@ -143,6 +146,9 @@ struct MatchingEngine: Sendable {
                             } else {
                                 // 3. Full miss — match every item in the chunk
                                 for i in 0..<chunk.count {
+                                    if i.isMultiple(of: 64), Task.isCancelled {
+                                        return []
+                                    }
                                     let item = chunk[i]
                                     let slice = UnsafeBufferPointer(
                                         start: allBytes.baseAddress! + Int(item.offset),
@@ -159,6 +165,7 @@ struct MatchingEngine: Sendable {
 
                             partitionMatches.append(contentsOf: chunkResults)
                         }
+                        guard !Task.isCancelled else { return [] }
                         // Sort this partition locally — the Merger does the global interleave
                         partitionMatches.sort(by: rankLessThan)
                         return partitionMatches
@@ -185,10 +192,8 @@ struct MatchingEngine: Sendable {
     /// Caller must hold the buffer pointer alive for the duration.
     private func matchItemsFromBuffer(prepared: PreparedPattern, items: [Item], allBytes: UnsafeBufferPointer<UInt8>, scoringBuffer: inout MatcherScratch) -> [MatchedItem] {
         var matched: [MatchedItem] = []
-        for item in items {
-            if matched.count % 100 == 0 {
-                guard !Task.isCancelled else { return [] }
-            }
+        for (itemIndex, item) in items.enumerated() {
+            if itemIndex.isMultiple(of: 64), Task.isCancelled { return [] }
             let slice = UnsafeBufferPointer(
                 start: allBytes.baseAddress! + Int(item.offset),
                 count: Int(item.length)
@@ -197,6 +202,7 @@ struct MatchingEngine: Sendable {
                 matched.append(MatchedItem(item: item, rankMatch: result, scheme: matcher.scheme, allBytes: allBytes))
             }
         }
+        guard !Task.isCancelled else { return [] }
         matched.sort(by: rankLessThan)
         return matched
     }

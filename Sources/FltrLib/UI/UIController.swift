@@ -7,6 +7,9 @@ import AsyncAlgorithms
 /// at the point of consumption to avoid staleness.
 struct QueryUpdate: Sendable {
     let query: String
+    /// Identifies the input state that requested this search. A cancelled task
+    /// can still reach an actor hop, so result application also verifies this.
+    let generation: UInt
 }
 
 /// Main UI controller - event loop and rendering
@@ -36,6 +39,7 @@ actor UIController {
     private var currentMatchTask: Task<Void, Never>?
     private var currentPreviewTask: Task<Void, Never>?
     private var fetchItemsTask: Task<Void, Never>?
+    private var matchGeneration: UInt = 0
 
     private var renderScheduled = false  // coalesces concurrent render requests
 
@@ -94,24 +98,21 @@ actor UIController {
         let refreshIntervalSlow: TimeInterval = 0.1
 
         // Debounced matching runs OUTSIDE the actor so it never blocks input.
-        // Each iteration waits for the previous match to finish (so that
-        // state.merger is up-to-date for incremental filtering), then fires
-        // a new detached task that does the heavy work.
+        // A new input cancels its predecessor immediately; the generation gate
+        // rejects any predecessor that gets as far as applying its result.
         let debounceTask = Task {
             for await update in queryUpdateStream.debounce(for: debounceDelay) {
-                if let prevTask = currentMatchTask {
-                    _ = await prevTask.value
-                }
+                guard update.generation == matchGeneration else { continue }
 
                 // Snapshot actor state while we still have isolation.
                 let previousQuery  = self.state.previousQuery
                 let currentMerger  = self.state.merger
                 let chunkList      = await self.cache.snapshotChunkList()
-                self.updatePreviousQuery(update.query)
 
                 currentMatchTask = Task.detached {
                     await self.runMatch(
                         query: update.query,
+                        generation: update.generation,
                         previousQuery: previousQuery,
                         merger: currentMerger,
                         chunkList: chunkList
@@ -160,14 +161,16 @@ actor UIController {
                         // debounce task; writing it here would let the debounce
                         // path see a stale value and permanently cap its results.
                         fetchItemsTask = Task {
+                            let query = self.state.query
+                            let generation = self.matchGeneration
                             let chunkList = await self.cache.snapshotChunkList()
-                            let query     = self.state.query
 
                             self.invalidateMergerCache()
                             self.chunkCache.clear()
 
                             await self.runMatch(
                                 query: query,
+                                generation: generation,
                                 previousQuery: "",  // force full search
                                 merger: .empty,
                                 chunkList: chunkList
@@ -243,7 +246,10 @@ actor UIController {
     }
 
     private func scheduleMatchUpdate() {
-        let update = QueryUpdate(query: state.query)
+        matchGeneration &+= 1
+        currentMatchTask?.cancel()
+        fetchItemsTask?.cancel()
+        let update = QueryUpdate(query: state.query, generation: matchGeneration)
         queryUpdateContinuation.yield(update)
     }
 
@@ -261,13 +267,13 @@ actor UIController {
         }
     }
 
-    private func updatePreviousQuery(_ query: String) {
-        state.previousQuery = QueryNormalizer.normalizeForMatching(query)
-    }
-
-    private func applyMatchResults(_ results: ResultMerger) {
-        guard !isExiting else { return }
+    /// Apply only the newest requested result. This is separate from task
+    /// cancellation because cancellation is cooperative.
+    private func applyMatchResults(_ results: ResultMerger, query: String, generation: UInt) -> Bool {
+        guard !isExiting, generation == matchGeneration else { return false }
         state.updateMatches(results)
+        state.previousQuery = QueryNormalizer.normalizeForMatching(query)
+        return true
     }
 
     private func updatePreviewAsync(manager: PreviewManager, command: String) async {
@@ -299,10 +305,12 @@ actor UIController {
     /// through `await self.*` helper calls.
     nonisolated private func runMatch(
         query: String,
+        generation: UInt,
         previousQuery: String,
         merger: ResultMerger,
         chunkList: ChunkList
     ) async {
+        guard !Task.isCancelled else { return }
         let overallStart = Date()
         let normalizedQuery = QueryNormalizer.normalizeForMatching(query)
         let normalizedPreviousQuery = QueryNormalizer.normalizeForMatching(previousQuery)
@@ -316,7 +324,9 @@ actor UIController {
         // Merger cache hit — only valid on the full-search path (the
         // incremental candidate set is a subset and would differ).
         if !canUseIncremental, let cached = await lookupMergerCache(pattern: normalizedQuery, itemCount: chunkList.count) {
-            await applyMatchResults(cached)
+            guard !Task.isCancelled,
+                  await applyMatchResults(cached, query: normalizedQuery, generation: generation)
+            else { return }
             await refreshPreviewIfNeeded(results: cached)
             await render()
             return
@@ -330,6 +340,8 @@ actor UIController {
             results = await engine.matchChunksParallel(pattern: normalizedQuery, chunkList: chunkList, cache: chunkCache, buffer: textBuffer)
         }
 
+        guard !Task.isCancelled else { return }
+
         logMatchTime(
             query: normalizedQuery,
             matchTime: Date().timeIntervalSince(matchStart) * 1000,
@@ -342,7 +354,7 @@ actor UIController {
             await storeMergerCache(pattern: normalizedQuery, itemCount: chunkList.count, results: results)
         }
 
-        await applyMatchResults(results)
+        guard await applyMatchResults(results, query: normalizedQuery, generation: generation) else { return }
         await refreshPreviewIfNeeded(results: results)
         await render()
     }
