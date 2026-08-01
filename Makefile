@@ -7,8 +7,8 @@ release:
 install:
 	cp ./.build/release/fltr ~/.local/bin/
 
-# Linux static build with mimalloc and increased stack size (aarch64 by default)
-# Usage: make linux (override via env: ARCH=x86_64 MIMALLOC_VERSION=3.0.10 make linux)
+# Linux static build with the Static Linux SDK's mimalloc and increased stack size (aarch64 by default)
+# Usage: make linux (override via env: ARCH=x86_64 make linux)
 
 linux:
 	scripts/build_linux.sh
