@@ -25,5 +25,5 @@ fi
 # The Swift Static Linux SDK's libc.a includes mimalloc. Linking a second copy
 # causes duplicate allocator symbols, so use the SDK-provided static allocator.
 
-"${SWIFT[@]}" build -c release --product fltr --swift-sdk "${SWIFT_SDK_NAME}" --triple "${ARCH}-swift-linux-musl" \
+"${SWIFT[@]}" build --build-system native -c release --product fltr --swift-sdk "${SWIFT_SDK_NAME}" --triple "${ARCH}-swift-linux-musl" \
   -Xlinker -z -Xlinker stack-size=0x80000

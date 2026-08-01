@@ -19,16 +19,8 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            arch: arm64
-          - runner: macos-26-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    name: Build macOS
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,19 +36,21 @@ jobs:
           swiftly run swift --version
           dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
 
-      - name: Build release binary
-        run: swift build -c release --product fltr
-
-      - name: Package binary
+      - name: Build and package binaries
         run: |
-          chmod +x .build/release/fltr
-          ditto -c -k --sequesterRsrc --keepParent .build/release/fltr fltr-macos-${{ matrix.arch }}.zip
+          mkdir dist
+          for arch in arm64 x86_64; do
+            swift build --build-system native -c release --product fltr --arch "${arch}"
+            binary_dir="$(swift build --build-system native -c release --arch "${arch}" --show-bin-path)"
+            chmod +x "${binary_dir}/fltr"
+            ditto -c -k --sequesterRsrc --keepParent "${binary_dir}/fltr" "dist/fltr-macos-${arch}.zip"
+          done
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
-          name: fltr-macos-${{ matrix.arch }}
-          path: fltr-macos-${{ matrix.arch }}.zip
+          name: fltr-macos
+          path: dist/fltr-macos-*.zip
           if-no-files-found: error
 
   generate-sboms:
@@ -90,16 +84,8 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Build static Linux (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            arch: aarch64
-          - runner: macos-26-intel
-            arch: x86_64
+    name: Build static Linux
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,26 +107,25 @@ jobs:
             https://download.swift.org/swift-6.4.x-branch/static-sdk/swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a/swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a_static-linux-0.1.0.artifactbundle.tar.gz \
             --checksum 2771036e478c0f9322a1735ce8baa3087ffa1d802ea4dd7ba564854300266bdd
 
-      - name: Build static release binary with mimalloc
-        run: ARCH=${{ matrix.arch }} make linux
-
-      - name: Verify static binary
-        run: |
-          file .build/${{ matrix.arch }}-swift-linux-musl/release/fltr | grep -F "statically linked"
-          nm .build/${{ matrix.arch }}-swift-linux-musl/release/fltr | grep -E '[[:space:]]mi_malloc$'
-
-      - name: Package binary
+      - name: Build, verify, and package binaries
         run: |
           mkdir dist
-          cp .build/${{ matrix.arch }}-swift-linux-musl/release/fltr dist/fltr
-          cp LICENSES/mimalloc-MIT.txt dist/LICENSE-mimalloc.txt
-          tar -C dist -czf fltr-linux-${{ matrix.arch }}.tar.gz fltr LICENSE-mimalloc.txt
+          for arch in aarch64 x86_64; do
+            ARCH="${arch}" make linux
+            binary=".build/${arch}-swift-linux-musl/release/fltr"
+            file "${binary}" | grep -F "statically linked"
+            nm "${binary}" | grep -E '[[:space:]]mi_malloc$'
+            mkdir "dist/${arch}"
+            cp "${binary}" "dist/${arch}/fltr"
+            cp LICENSES/mimalloc-MIT.txt "dist/${arch}/LICENSE-mimalloc.txt"
+            tar -C "dist/${arch}" -czf "dist/fltr-linux-${arch}.tar.gz" fltr LICENSE-mimalloc.txt
+          done
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
-          name: fltr-linux-${{ matrix.arch }}
-          path: fltr-linux-${{ matrix.arch }}.tar.gz
+          name: fltr-linux
+          path: dist/fltr-linux-*.tar.gz
           if-no-files-found: error
 
   publish:
