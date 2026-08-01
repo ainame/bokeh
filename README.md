@@ -42,7 +42,7 @@ cp .build/release/fltr /usr/local/bin/
 
 ### Build Linux static binary (musl + Static Linux SDK)
 
-`make linux` builds `fltr` for Linux using the Swift Static Linux SDK, whose static libc includes `mimalloc`. The release includes static `aarch64` and `x86_64` Linux archives; each includes mimalloc's MIT license as `LICENSE-mimalloc.txt`.
+`make linux` builds `fltr` for Linux using the Swift Static Linux SDK, whose static libc includes `mimalloc`. The release includes static `aarch64` and `x86_64` Linux archives. Every binary archive includes `LICENSE`, `THIRD_PARTY_NOTICES.md`, and the referenced `LICENSES/` directory.
 
 Each GitHub Release also includes `fltr-sbom-cyclonedx.json` and
 `fltr-sbom-spdx.json`: an inventory of the `fltr` product's resolved SwiftPM

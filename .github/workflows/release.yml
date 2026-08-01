@@ -42,8 +42,13 @@ jobs:
           for arch in arm64 x86_64; do
             swift build --build-system native -c release --product fltr --arch "${arch}"
             binary_dir="$(swift build --build-system native -c release --arch "${arch}" --show-bin-path)"
-            chmod +x "${binary_dir}/fltr"
-            ditto -c -k --sequesterRsrc --keepParent "${binary_dir}/fltr" "dist/fltr-macos-${arch}.zip"
+            archive_dir="dist/fltr-macos-${arch}"
+            mkdir "${archive_dir}"
+            cp "${binary_dir}/fltr" "${archive_dir}/fltr"
+            chmod +x "${archive_dir}/fltr"
+            cp LICENSE THIRD_PARTY_NOTICES.md "${archive_dir}"
+            cp -R LICENSES "${archive_dir}/LICENSES"
+            ditto -c -k --sequesterRsrc --keepParent "${archive_dir}" "dist/fltr-macos-${arch}.zip"
           done
 
       - name: Upload release asset
@@ -115,10 +120,12 @@ jobs:
             binary=".build/${arch}-swift-linux-musl/release/fltr"
             file "${binary}" | grep -F "statically linked"
             nm "${binary}" | grep -E '[[:space:]]mi_malloc$'
-            mkdir "dist/${arch}"
-            cp "${binary}" "dist/${arch}/fltr"
-            cp LICENSES/mimalloc-MIT.txt "dist/${arch}/LICENSE-mimalloc.txt"
-            tar -C "dist/${arch}" -czf "dist/fltr-linux-${arch}.tar.gz" fltr LICENSE-mimalloc.txt
+            archive_dir="dist/fltr-linux-${arch}"
+            mkdir "${archive_dir}"
+            cp "${binary}" "${archive_dir}/fltr"
+            cp LICENSE THIRD_PARTY_NOTICES.md "${archive_dir}"
+            cp -R LICENSES "${archive_dir}/LICENSES"
+            tar -C dist -czf "dist/fltr-linux-${arch}.tar.gz" "fltr-linux-${arch}"
           done
 
       - name: Upload release asset
