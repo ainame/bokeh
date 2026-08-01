@@ -63,10 +63,10 @@ jobs:
           curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
           tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
           ./swiftly init --quiet-shell-followup
-          export PATH="${HOME}/.local/bin:${PATH}"
+          . "${SWIFTLY_HOME_DIR:-${HOME}/.local/share/swiftly}/env.sh"
           swiftly install 6.3.3
           swiftly run swift --version
-          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
 
       - name: Install Swift Static Linux SDK
         run: |
