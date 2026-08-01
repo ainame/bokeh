@@ -13,6 +13,8 @@ public struct StatusBar: Sendable {
         public let totalCount: Int
         public let selectedCount: Int
         public let isLoading: Bool
+        public let searchProgressCompleted: Int?
+        public let searchProgressTotal: Int
         public let spinnerFrame: Int
         public let scrollOffset: Int
         public let displayHeight: Int
@@ -24,6 +26,8 @@ public struct StatusBar: Sendable {
             totalCount: Int,
             selectedCount: Int = 0,
             isLoading: Bool = false,
+            searchProgressCompleted: Int? = nil,
+            searchProgressTotal: Int = 0,
             spinnerFrame: Int = 0,
             scrollOffset: Int = 0,
             displayHeight: Int = 0,
@@ -34,6 +38,8 @@ public struct StatusBar: Sendable {
             self.totalCount = totalCount
             self.selectedCount = selectedCount
             self.isLoading = isLoading
+            self.searchProgressCompleted = searchProgressCompleted
+            self.searchProgressTotal = searchProgressTotal
             self.spinnerFrame = spinnerFrame
             self.scrollOffset = scrollOffset
             self.displayHeight = displayHeight
@@ -64,6 +70,10 @@ public struct StatusBar: Sendable {
             status = "\(config.matchedCount)/\(config.totalCount)"
         } else {
             status = "\(config.matchedCount)/\(config.totalCount) (\(config.selectedCount) selected)"
+        }
+
+        if let completed = config.searchProgressCompleted {
+            status += " · searching \(completed)/\(config.searchProgressTotal)"
         }
         
         return ANSIColors.moveCursor(row: config.row, col: 1) + 

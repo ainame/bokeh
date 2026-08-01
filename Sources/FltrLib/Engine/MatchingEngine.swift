@@ -21,7 +21,7 @@ struct MatchingEngine: Sendable {
     /// *items* is a flat ``[Item]`` — used on the incremental-filter path where the
     /// candidate set was extracted from a previous merger.  *buffer* is the shared
     /// ``TextBuffer``; each task opens it independently via ``withBytes``.
-    func matchItemsParallel(pattern: String, items: [Item], buffer: TextBuffer) async -> ResultMerger {
+    func matchItemsParallel(pattern: String, items: [Item], buffer: TextBuffer, progress: SearchProgress? = nil) async -> ResultMerger {
         guard !pattern.isEmpty else {
             // Score = 0, positions empty → points are (0, byLength, 0, maxU16).
             // Synthesise without opening the buffer.
@@ -41,6 +41,7 @@ struct MatchingEngine: Sendable {
                 var scoringBuffer = matcher.makeBuffer()
                 return matchItemsFromBuffer(prepared: prepared, items: items, allBytes: allBytes, scoringBuffer: &scoringBuffer)
             }
+            progress?.advance(by: items.count)
             return ResultMerger(partitions: [results])
         }
 
@@ -59,7 +60,9 @@ struct MatchingEngine: Sendable {
 
                     return buffer.withBytes { allBytes in
                         var scoringBuffer = self.matcher.makeBuffer()
-                        return self.matchItemsFromBuffer(prepared: prepared, items: Array(items[partStart..<partEnd]), allBytes: allBytes, scoringBuffer: &scoringBuffer)
+                        let matches = self.matchItemsFromBuffer(prepared: prepared, items: Array(items[partStart..<partEnd]), allBytes: allBytes, scoringBuffer: &scoringBuffer)
+                        progress?.advance(by: partEnd - partStart)
+                        return matches
                     }
                 }
 
@@ -87,7 +90,7 @@ struct MatchingEngine: Sendable {
     ///   4. Store result if selectivity gate passes (count ≤ queryCacheMax).
     ///
     /// Parallelisation and cancellation logic mirrors ``matchItemsParallel``.
-    func matchChunksParallel(pattern: String, chunkList: ChunkList, cache: ChunkCache, buffer: TextBuffer) async -> ResultMerger {
+    func matchChunksParallel(pattern: String, chunkList: ChunkList, cache: ChunkCache, buffer: TextBuffer, progress: SearchProgress? = nil) async -> ResultMerger {
         guard !pattern.isEmpty else {
             // Zero-allocation fast path: ChunkList in insertion order IS rank order.
             return .fromChunkList(chunkList)
@@ -123,6 +126,7 @@ struct MatchingEngine: Sendable {
                             // 1. Exact cache hit — zero matching work
                             if let cached = cache.lookup(chunkIndex: ci, chunkCount: chunk.count, query: pattern) {
                                 partitionMatches.append(contentsOf: cached)
+                                progress?.advance(by: chunk.count)
                                 continue
                             }
 
@@ -166,6 +170,7 @@ struct MatchingEngine: Sendable {
                             cache.add(chunkIndex: ci, chunkCount: chunk.count, query: pattern, results: chunkResults)
 
                             partitionMatches.append(contentsOf: chunkResults)
+                            progress?.advance(by: chunk.count)
                         }
                         guard !Task.isCancelled else { return [] }
                         // Sort this partition locally — the Merger does the global interleave

@@ -82,6 +82,7 @@ struct UIRenderer: Sendable {
             totalItems: state.totalItems,
             selectedItems: state.selectedItems,
             isReadingStdin: context.isReadingStdin,
+            searchProgress: context.searchProgress,
             scrollOffset: state.scrollOffset,
             displayHeight: displayHeight,
             row: visibleItems.count + 3,
@@ -203,6 +204,7 @@ struct UIRenderer: Sendable {
         totalItems: Int,
         selectedItems: Set<Item.Index>,
         isReadingStdin: Bool,
+        searchProgress: SearchProgress.Snapshot?,
         scrollOffset: Int,
         displayHeight: Int,
         row: Int,
@@ -213,7 +215,9 @@ struct UIRenderer: Sendable {
             matchedCount: matchedCount,
             totalCount: totalItems,
             selectedCount: selectedItems.count,
-            isLoading: isReadingStdin,
+            isLoading: isReadingStdin || searchProgress != nil,
+            searchProgressCompleted: searchProgress?.completed,
+            searchProgressTotal: searchProgress?.total ?? 0,
             spinnerFrame: spinnerFrame,
             scrollOffset: scrollOffset,
             displayHeight: displayHeight,
@@ -268,6 +272,7 @@ struct RenderContext: Sendable {
     let rows: Int
     let cols: Int
     let isReadingStdin: Bool
+    let searchProgress: SearchProgress.Snapshot?
     let showSplitPreview: Bool
     let showFloatingPreview: Bool
     let spinnerFrame: Int

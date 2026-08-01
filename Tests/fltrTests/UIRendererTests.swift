@@ -16,6 +16,7 @@ func rendererAnchorsCursorAtPromptCaret() {
             rows: 12,
             cols: 40,
             isReadingStdin: false,
+            searchProgress: nil,
             showSplitPreview: false,
             showFloatingPreview: false,
             spinnerFrame: 0
@@ -42,6 +43,7 @@ func rendererCursorAnchorWideChars() {
             rows: 12,
             cols: 40,
             isReadingStdin: false,
+            searchProgress: nil,
             showSplitPreview: false,
             showFloatingPreview: false,
             spinnerFrame: 0
@@ -51,6 +53,31 @@ func rendererCursorAnchorWideChars() {
 
     // "> " is 2 cells. "あ" is 2 cells. Caret at end -> col 5.
     #expect(frame.hasSuffix("\u{001B}[1;5H"))
+}
+
+@Test("Renderer shows search progress while matching")
+func rendererShowsSearchProgress() {
+    let progress = SearchProgress(total: 500)
+    progress.advance(by: 128)
+
+    let renderer = UIRenderer(maxHeight: nil, multiSelect: false)
+    let frame = renderer.assembleFrame(
+        state: UIState(),
+        visibleItems: [],
+        highlightPositions: [:],
+        context: RenderContext(
+            rows: 12,
+            cols: 80,
+            isReadingStdin: false,
+            searchProgress: progress.snapshot(),
+            showSplitPreview: false,
+            showFloatingPreview: false,
+            spinnerFrame: 0
+        ),
+        buffer: TextBuffer()
+    )
+
+    #expect(frame.contains("searching 128/500"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")
@@ -64,6 +91,7 @@ func rendererUsesViewportScrollbar() {
         rows: 12,
         cols: 40,
         isReadingStdin: false,
+        searchProgress: nil,
         showSplitPreview: false,
         showFloatingPreview: false,
         spinnerFrame: 0

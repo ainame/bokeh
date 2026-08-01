@@ -103,6 +103,9 @@ actor UIController {
     private var lastItemCount: Int = 0
     private var isReadingStdin: Bool = true  // Cache to avoid async call in render
     private var spinnerFrame: Int = 0  // Spinner animation frame counter
+    private var searchProgress: SearchProgress?
+    private var lastSearchProgress: Int = -1
+    private var lastSearchProgressRender = Date.distantPast
     private let multiSelect: Bool
     private var preview: PreviewState
     private let renderer: UIRenderer
@@ -199,6 +202,16 @@ actor UIController {
                 scheduleRender()
             }
 
+            if let progress = searchProgress {
+                let snapshot = progress.snapshot()
+                let now = Date()
+                if snapshot.completed != lastSearchProgress || now.timeIntervalSince(lastSearchProgressRender) >= 0.1 {
+                    lastSearchProgress = snapshot.completed
+                    lastSearchProgressRender = now
+                    scheduleRender()
+                }
+            }
+
             let currentCount = await cache.count()
 
             if currentCount > lastItemCount {
@@ -227,7 +240,8 @@ actor UIController {
                             generation: generation,
                             previousQuery: "",  // force full search
                             merger: .empty,
-                            chunkList: chunkList
+                            chunkList: chunkList,
+                            progress: nil
                         )
                     }
 
@@ -322,6 +336,11 @@ actor UIController {
         let merger = state.merger
         let generation = matchGeneration
         let cache = self.cache
+        let progress = SearchProgress(total: state.totalItems)
+        searchProgress = progress
+        lastSearchProgress = -1
+        lastSearchProgressRender = .distantPast
+        scheduleRender()
         currentMatchTask = Task.detached(priority: .utility) {
             let chunkList = await cache.snapshotChunkList()
             guard !Task.isCancelled else { return }
@@ -330,7 +349,8 @@ actor UIController {
                 generation: generation,
                 previousQuery: previousQuery,
                 merger: merger,
-                chunkList: chunkList
+                chunkList: chunkList,
+                progress: progress
             )
         }
     }
@@ -429,7 +449,8 @@ actor UIController {
         generation: UInt,
         previousQuery: String,
         merger: ResultMerger,
-        chunkList: ChunkList
+        chunkList: ChunkList,
+        progress: SearchProgress?
     ) async {
         guard !Task.isCancelled else { return }
         let overallStart = Date()
@@ -441,10 +462,12 @@ actor UIController {
         let canUseIncremental = !normalizedPreviousQuery.isEmpty &&
                                 normalizedQuery.hasPrefix(normalizedPreviousQuery) &&
                                 normalizedQuery.count > normalizedPreviousQuery.count
+        progress?.setTotal(canUseIncremental ? merger.count : chunkList.count)
 
         // Merger cache hit — only valid on the full-search path (the
         // incremental candidate set is a subset and would differ).
         if !canUseIncremental, let cached = await lookupMergerCache(pattern: normalizedQuery, itemCount: chunkList.count) {
+            await finishSearch(generation: generation, progress: progress)
             guard !Task.isCancelled,
                   await applyMatchResults(cached, query: normalizedQuery, generation: generation)
             else { return }
@@ -456,12 +479,14 @@ actor UIController {
         let matchStart = Date()
         let results: ResultMerger
         if canUseIncremental {
-            results = await engine.matchItemsParallel(pattern: normalizedQuery, items: merger.allItems(), buffer: textBuffer)
+            results = await engine.matchItemsParallel(pattern: normalizedQuery, items: merger.allItems(), buffer: textBuffer, progress: progress)
         } else {
-            results = await engine.matchChunksParallel(pattern: normalizedQuery, chunkList: chunkList, cache: chunkCache, buffer: textBuffer)
+            results = await engine.matchChunksParallel(pattern: normalizedQuery, chunkList: chunkList, cache: chunkCache, buffer: textBuffer, progress: progress)
         }
 
         guard !Task.isCancelled else { return }
+
+        await finishSearch(generation: generation, progress: progress)
 
         logMatchTime(
             query: normalizedQuery,
@@ -491,6 +516,12 @@ actor UIController {
         guard preview.showSplit || preview.showFloating else { return }
         guard let manager = preview.manager, let command = preview.command else { return }
         await updatePreviewAsync(manager: manager, command: command)
+    }
+
+    private func finishSearch(generation: UInt, progress: SearchProgress?) {
+        guard generation == matchGeneration, searchProgress === progress else { return }
+        searchProgress = nil
+        lastSearchProgress = -1
     }
 
     /// Append a single perf-log line when a match round takes > 10 ms.
@@ -537,13 +568,14 @@ actor UIController {
             rows: rows,
             cols: cols,
             isReadingStdin: isReadingStdin,
+            searchProgress: searchProgress?.snapshot(),
             showSplitPreview: preview.showSplit,
             showFloatingPreview: preview.showFloating,
             spinnerFrame: spinnerFrame
         )
 
         // Increment spinner frame for animation
-        if isReadingStdin {
+        if isReadingStdin || searchProgress != nil {
             spinnerFrame = (spinnerFrame + 1) % 10
         }
 
