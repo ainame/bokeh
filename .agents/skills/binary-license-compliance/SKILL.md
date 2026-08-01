@@ -27,7 +27,11 @@ artifact incorporates and a review of its license obligations.
    jq -r '.packages[] | [.name, .versionInfo, .licenseConcluded] | @tsv' sbom.spdx.json
    ```
 
-5. Inspect the built archive itself. Verify its file list and, for static
+5. Do not treat an SDK SBOM as proof that every listed package is linked. Audit
+   each shipped architecture from the built or downloaded release binary using
+   `nm`, a linker map, or equivalent symbol evidence. Record the linked SDK
+   components separately from the SDK inventory.
+6. Inspect the built archive itself. Verify its file list and, for static
    binaries, verify the claimed linkage and allocator/runtime evidence.
 
 Use authoritative upstream license files or official license publishers when
@@ -53,12 +57,19 @@ For MIT, include the copyright and permission notice. Check any additional
 exceptions, copyleft terms, and attribution clauses from the actual dependency;
 do not generalize from an SPDX identifier alone.
 
+Copy an upstream copyright file byte-for-byte when it carries component-specific
+attribution (for example, a libc `COPYRIGHT` file). Record runtime-library
+exceptions when they apply; they may reduce attribution requirements but do not
+erase the need to inventory the embedded runtime.
+
 ## Automate distribution
 
 Update the release packaging workflow so every archive contains the same notice
 bundle. Keep SBOMs as separate release attachments unless users explicitly
 need self-contained offline compliance material. If an SDK publishes its own
-SBOM, consider attaching it separately and use it to drive the SDK audit.
+SBOM, attach it separately and use it to drive the SDK audit. Validate that the
+workflow locates one SDK SBOM after installing the SDK and uploads it with the
+other release assets.
 
 Update user-facing installation/release documentation to describe the notice
 bundle. Avoid hard-coded one-off license filenames when a combined notices
@@ -72,7 +83,9 @@ Before finishing:
 2. Build or stage representative archives, then list ZIP/tar contents to prove
    `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `LICENSES/` are present.
 3. Verify copied license text against the authoritative checkout where possible.
-4. State the exact covered scope and any remaining unaudited SDK, system, or
+4. After publication, download representative release archives and SBOMs;
+   inspect their actual contents rather than relying on the workflow log alone.
+5. State the exact covered scope and any remaining unaudited SDK, system, or
    app-store component boundary. Do not describe partial coverage as complete.
-5. Commit focused repository changes, but do not push, tag, or republish a
+6. Commit focused repository changes, but do not push, tag, or republish a
    release unless the user requests it.
