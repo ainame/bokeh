@@ -162,12 +162,9 @@ actor UIController {
         let initialMatches = await engine.matchChunksParallel(pattern: "", chunkList: initialChunkList, cache: chunkCache, buffer: textBuffer)
         state.updateMatches(initialMatches)
 
-        refreshPreview()
-        await render(generation: renderGeneration)
-
         // Input is a continuous producer, not something the UI loop polls.
-        // This task is the reducer's only input path; terminal output and
-        // matching work cannot hold it up.
+        // Install its reducer before the first prompt is published: terminal
+        // output is asynchronous, so a user may type as soon as it appears.
         let inputEvents = await terminal.inputEvents()
         inputTask = Task { [weak self] in
             for await key in inputEvents {
@@ -175,6 +172,9 @@ actor UIController {
                 await self?.handleKey(key: key)
             }
         }
+
+        refreshPreview()
+        await render(generation: renderGeneration)
 
         var lastRefresh = Date()
         let refreshIntervalFast: TimeInterval = 0.02

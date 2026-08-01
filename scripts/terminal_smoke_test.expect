@@ -1,0 +1,58 @@
+#!/usr/bin/expect -f
+# Exercises the real /dev/tty path: rapid input must reach the prompt and
+# Escape must restore the terminal and exit. This intentionally uses a PTY,
+# unlike normal stdin-based CLI tests.
+
+set timeout 5
+
+if {$argc != 1} {
+    puts stderr "usage: terminal_smoke_test.expect /path/to/fltr"
+    exit 2
+}
+
+set binary [lindex $argv 0]
+set input "find.txt\\nfind.txt\\nfind.txt\\nfind.txt\\nfind.txt\\n"
+
+spawn sh -c "stty columns 80 rows 24; printf '$input' | exec '$binary'"
+
+expect {
+    -re {> } {}
+    timeout {
+        puts stderr "initial prompt did not render"
+        exit 1
+    }
+}
+
+# Let the initial frame task release the UI actor before exercising input.
+after 100
+
+# Inject at 1 ms/key. This remains far faster than normal typing while avoiding
+# an expect/PTY bulk-send quirk that can strand the final byte before a read.
+# The final prompt, not each transient prompt, is the contract because the
+# output mailbox is latest-wins.
+foreach character {p l a t f o r m} {
+    send -- $character
+    after 1
+}
+expect {
+    -re {> platform} {}
+    timeout {
+        puts stderr "final prompt did not render"
+        exit 1
+    }
+}
+
+send -- "\033"
+expect {
+    eof {}
+    timeout {
+        puts stderr "fltr did not exit after Escape"
+        exit 1
+    }
+}
+
+set status [lindex [wait] 3]
+if {$status != 0} {
+    puts stderr "fltr exited with status $status"
+    exit 1
+}

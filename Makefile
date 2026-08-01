@@ -1,4 +1,4 @@
-.PHONY: all release install linux profile benchmark
+.PHONY: all release install linux profile benchmark terminal-smoke
 
 all: release install
 
@@ -31,6 +31,10 @@ benchmark: release
 		--runs $(RUNS) \
 		--warmup $(WARMUP) \
 		--seed $(SEED)
+
+# macOS PTY integration smoke test for input/render/teardown ownership.
+terminal-smoke: release
+	expect scripts/terminal_smoke_test.expect ./.build/release/fltr
 
 COUNT ?= 500000
 MODE ?= all
