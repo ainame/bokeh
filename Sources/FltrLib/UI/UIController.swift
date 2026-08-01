@@ -1,16 +1,5 @@
 import Foundation
 import TUI
-import AsyncAlgorithms
-
-/// Single-field message yielded into the debounced query stream.
-/// previousQuery is intentionally absent — it is read fresh from the actor
-/// at the point of consumption to avoid staleness.
-struct QueryUpdate: Sendable {
-    let query: String
-    /// Identifies the input state that requested this search. A cancelled task
-    /// can still reach an actor hop, so result application also verifies this.
-    let generation: UInt
-}
 
 /// Immutable actor snapshot consumed by the detached frame builder.  The
 /// `TextBuffer` reference is safe to read concurrently: it holds its read lock
@@ -118,11 +107,6 @@ actor UIController {
     private let renderer: UIRenderer
     private let inputHandler: InputHandler
 
-    // Debounced query stream feeds runMatch; the continuation is the write end.
-    private let debounceDelay: Duration
-    private let queryUpdateStream: AsyncStream<QueryUpdate>
-    private let queryUpdateContinuation: AsyncStream<QueryUpdate>.Continuation
-
     // Cancellable background tasks
     private var currentMatchTask: Task<Void, Never>?
     private var currentPreviewTask: Task<Void, Never>?
@@ -143,7 +127,7 @@ actor UIController {
     // escape sequences onto stdout after ttyFd has been closed.
     private var isExiting = false
 
-    init(terminal: any Terminal, matcher: FuzzyMatcher, cache: ItemCache, reader: StdinReader, maxHeight: Int? = nil, multiSelect: Bool = false, previewCommand: String? = nil, useFloatingPreview: Bool = false, debounceDelay: Duration = .milliseconds(50)) {
+    init(terminal: any Terminal, matcher: FuzzyMatcher, cache: ItemCache, reader: StdinReader, maxHeight: Int? = nil, multiSelect: Bool = false, previewCommand: String? = nil, useFloatingPreview: Bool = false, debounceDelay: Duration = .zero) {
         self.terminal = terminal
         self.matcher = matcher
         self.engine = MatchingEngine(matcher: matcher)
@@ -152,7 +136,9 @@ actor UIController {
         self.reader = reader
         self.maxHeight = maxHeight
         self.multiSelect = multiSelect
-        self.debounceDelay = debounceDelay
+        // Kept for source compatibility with callers from the debounce-based
+        // implementation. Search dispatch is now immediate and latest-wins.
+        _ = debounceDelay
 
         self.preview = PreviewState(command: previewCommand, useFloating: useFloatingPreview)
         self.renderer = UIRenderer(maxHeight: maxHeight, multiSelect: multiSelect)
@@ -160,11 +146,6 @@ actor UIController {
             multiSelect: multiSelect,
             hasPreview: previewCommand != nil
         )
-
-        var continuation: AsyncStream<QueryUpdate>.Continuation!
-        let stream = AsyncStream<QueryUpdate> { continuation = $0 }
-        self.queryUpdateStream = stream
-        self.queryUpdateContinuation = continuation
     }
 
     /// Run the main UI loop
@@ -185,30 +166,6 @@ actor UIController {
         let refreshIntervalFast: TimeInterval = 0.02
         let refreshIntervalSlow: TimeInterval = 0.1
 
-        // Debounced matching runs OUTSIDE the actor so it never blocks input.
-        // A new input cancels its predecessor immediately; the generation gate
-        // rejects any predecessor that gets as far as applying its result.
-        let debounceTask = Task {
-            for await update in queryUpdateStream.debounce(for: debounceDelay) {
-                guard update.generation == matchGeneration else { continue }
-
-                // Snapshot actor state while we still have isolation.
-                let previousQuery  = self.state.previousQuery
-                let currentMerger  = self.state.merger
-                let chunkList      = await self.cache.snapshotChunkList()
-
-                currentMatchTask = Task.detached {
-                    await self.runMatch(
-                        query: update.query,
-                        generation: update.generation,
-                        previousQuery: previousQuery,
-                        merger: currentMerger,
-                        chunkList: chunkList
-                    )
-                }
-            }
-        }
-
         // Main event loop
         while !state.shouldExit {
             // Exit if the controlling terminal has disconnected (e.g. shell closed the
@@ -228,7 +185,6 @@ actor UIController {
 
             if let key = await terminal.readInputEvent() {
                 await handleKey(key: key)
-                scheduleRender()
             } else {
                 let currentCount = await cache.count()
 
@@ -269,9 +225,8 @@ actor UIController {
                     }
                 }
 
-                // Brief sleep to reduce CPU usage when no input available
-                // Terminal readByte already has 100ms timeout, so combined we check
-                // for updates approximately every 105ms when idle
+                // The input pump is independent of this loop. Yield briefly so
+                // streaming maintenance does not busy-spin while it is idle.
                 try? await Task.sleep(for: .milliseconds(5))
             }
         }
@@ -283,13 +238,10 @@ actor UIController {
         // ttyFd is closed, and spill the entire UI frame onto stdout.
         isExiting = true
 
-        queryUpdateContinuation.finish()
         currentMatchTask?.cancel()
         currentPreviewTask?.cancel()
         fetchItemsTask?.cancel()
         currentFrameTask?.cancel()
-        debounceTask.cancel()
-
         await terminal.exitRawMode()
 
         return state.getSelectedItems()
@@ -312,16 +264,21 @@ actor UIController {
 
         switch action {
         case .none:
-            break
+            if !state.shouldExit {
+                schedulePromptRender()
+            }
 
         case .scheduleMatchUpdate:
             scheduleMatchUpdate()
+            schedulePromptRender()
 
         case .updatePreview:
             refreshPreview()
+            scheduleRender()
 
         case .updatePreviewScroll(let offset):
             preview.scrollOffset = offset
+            scheduleRender()
 
         case .togglePreview:
             if preview.useFloating {
@@ -331,6 +288,7 @@ actor UIController {
                 preview.showSplit.toggle()
                 if preview.showSplit { refreshPreview() }
             }
+            scheduleRender()
         }
     }
 
@@ -338,8 +296,25 @@ actor UIController {
         matchGeneration &+= 1
         currentMatchTask?.cancel()
         fetchItemsTask?.cancel()
-        let update = QueryUpdate(query: state.query, generation: matchGeneration)
-        queryUpdateContinuation.yield(update)
+
+        // Snapshot the actor-owned incremental state synchronously, then do
+        // the potentially suspending cache snapshot and CPU work elsewhere.
+        let query = state.query
+        let previousQuery = state.previousQuery
+        let merger = state.merger
+        let generation = matchGeneration
+        let cache = self.cache
+        currentMatchTask = Task.detached(priority: .userInitiated) {
+            let chunkList = await cache.snapshotChunkList()
+            guard !Task.isCancelled else { return }
+            await self.runMatch(
+                query: query,
+                generation: generation,
+                previousQuery: previousQuery,
+                merger: merger,
+                chunkList: chunkList
+            )
+        }
     }
 
     /// Cancel any in-flight preview and kick off a fresh one in the background.
@@ -389,6 +364,28 @@ actor UIController {
             if generation != renderGeneration {
                 scheduleRender()
             }
+        }
+    }
+
+    /// Repaint only the prompt while a new search is running. This is the hot
+    /// typing path: it avoids full-frame construction and visible-row matching.
+    private func schedulePromptRender() {
+        renderGeneration &+= 1
+        currentFrameTask?.cancel()
+        let generation = renderGeneration
+        let query = state.query
+        let cursorPosition = state.cursorPosition
+        let renderer = self.renderer
+
+        Task {
+            let rawSize = (try? await terminal.getSize()) ?? (24, 80)
+            guard !isExiting, generation == renderGeneration else { return }
+            let prompt = renderer.renderInputLine(
+                query: query,
+                cursorPosition: cursorPosition,
+                cols: max(10, rawSize.1)
+            )
+            await terminal.write(prompt)
         }
     }
 

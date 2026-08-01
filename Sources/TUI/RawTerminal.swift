@@ -18,6 +18,8 @@ public actor RawTerminal: Terminal {
     private var ttyFd: FileDescriptor?
     private var isRawMode = false
     private var inputDecoder = InputDecoder()
+    private var inputPumpTask: Task<Void, Never>?
+    private var inputGeneration: UInt = 0
     public private(set) var ttyBroken = false  // set on fatal read error (EIO/EBADF)
 
     // Cleanup state that needs to be accessed from nonisolated context (protected by Mutex)
@@ -26,6 +28,12 @@ public actor RawTerminal: Terminal {
     private struct CleanupState: Sendable {
         let fd: FileDescriptor
         let termios: termios
+    }
+
+    private enum InputRead: Sendable {
+        case byte(UInt8)
+        case timeout
+        case broken
     }
 
     public enum TerminalError: Error {
@@ -39,6 +47,7 @@ public actor RawTerminal: Terminal {
     public init() {}
 
     deinit {
+        inputPumpTask?.cancel()
         // Safety net: ensure terminal is restored even if exitRawMode() wasn't called
         performCleanup()
     }
@@ -106,6 +115,9 @@ public actor RawTerminal: Terminal {
         flush()
 
         isRawMode = true
+        ttyBroken = false
+        inputGeneration &+= 1
+        startInputPump(fd: fd, generation: inputGeneration)
     }
 
     /// Exits raw mode and restores original terminal state.
@@ -114,6 +126,10 @@ public actor RawTerminal: Terminal {
     /// exits the alternate screen buffer, and shows the cursor.
     public func exitRawMode() {
         guard isRawMode else { return }
+
+        inputGeneration &+= 1
+        inputPumpTask?.cancel()
+        inputPumpTask = nil
 
         // Disable mouse tracking
         write("\u{001B}[?1006l")  // Disable SGR extended mouse mode
@@ -195,41 +211,52 @@ public actor RawTerminal: Terminal {
         // it serialises keyboard reads and can make rapid typing feel laggy.
     }
 
-    /// Reads terminal input and decodes semantic key events.
-    ///
-    /// Returns nil when no full event is available yet.
+    /// Returns the next input event already decoded by the input pump.
+    /// This actor method never performs a blocking terminal read, so output
+    /// writes cannot delay the UI controller from handling queued keystrokes.
     public func readInputEvent() -> Key? {
-        if let byte = readRawByte() {
-            inputDecoder.feed(byte)
-        } else {
-            inputDecoder.handleTimeout()
-        }
-        return inputDecoder.nextEvent()
+        inputDecoder.nextEvent()
     }
 
-    /// Reads a single byte from terminal input (non-blocking).
-    ///
-    /// - Returns: The byte read, or nil if no input is available within the VTIME window.
-    ///            Sets `ttyBroken` on fatal errors (EIO, EBADF) so the caller can detect
-    ///            a closed/disconnected terminal and exit cleanly.
-    private func readRawByte() -> UInt8? {
-        guard let fd = ttyFd else { return nil }
+    /// The POSIX read has a VTIME timeout and can block the executing thread.
+    /// Keep it in a dedicated detached task so RawTerminal can still service
+    /// output and UIController can consume already-decoded events.
+    private func startInputPump(fd: FileDescriptor, generation: UInt) {
+        inputPumpTask = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                let read = Self.readRawByte(from: fd)
+                guard let self else { return }
+                await self.acceptInput(read, generation: generation)
+                if case .broken = read { return }
+            }
+        }
+    }
+
+    private func acceptInput(_ read: InputRead, generation: UInt) {
+        guard isRawMode, generation == inputGeneration else { return }
+        switch read {
+        case .byte(let byte):
+            inputDecoder.feed(byte)
+        case .timeout:
+            inputDecoder.handleTimeout()
+        case .broken:
+            ttyBroken = true
+        }
+    }
+
+    nonisolated private static func readRawByte(from fd: FileDescriptor) -> InputRead {
         var byte: UInt8 = 0
         do {
             let bytesRead = try withUnsafeMutableBytes(of: &byte) { buffer in
                 try fd.read(into: buffer)
             }
-            return bytesRead == 1 ? byte : nil
+            return bytesRead == 1 ? .byte(byte) : .timeout
         } catch let error as Errno {
-            // EIO / EBADF mean the controlling terminal is gone (e.g. the shell closed).
-            // EAGAIN is a normal "no data yet" on a non-blocking fd — not fatal.
-            if error != .resourceTemporarilyUnavailable {
-                ttyBroken = true
-            }
-            return nil
+            // EAGAIN is normal on a non-blocking fd; EIO / EBADF mean the
+            // controlling terminal has gone away.
+            return error == .resourceTemporarilyUnavailable ? .timeout : .broken
         } catch {
-            ttyBroken = true
-            return nil
+            return .broken
         }
     }
 

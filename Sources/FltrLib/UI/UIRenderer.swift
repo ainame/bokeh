@@ -97,7 +97,7 @@ struct UIRenderer: Sendable {
     }
 
     /// Render input line with cursor
-    private func renderInputLine(query: String, cursorPosition: Int, cols: Int) -> String {
+    func renderInputLine(query: String, cursorPosition: Int, cols: Int) -> String {
         let prompt = "> "
         let availableWidth = cols - prompt.count - 1
 

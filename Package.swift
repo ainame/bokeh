@@ -17,7 +17,6 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.8.2"),
         .package(url: "https://github.com/apple/swift-system", from: "1.7.5"),
-        .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.1.5"),
         .package(url: "https://github.com/apple/swift-collections", from: "1.6.0"),
         .package(url: "https://github.com/ainame/swift-displaywidth", from: "0.1.0"),
         .package(url: "https://github.com/swiftlang/swift-subprocess", exact: "1.0.0-beta.1"),
@@ -41,7 +40,6 @@ let package = Package(
                 "TUI",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SystemPackage", package: "swift-system"),
-                .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
                 .product(name: "Collections", package: "swift-collections"),
                 .product(name: "Subprocess", package: "swift-subprocess"),
                 .product(name: "FuzzyMatch", package: "fuzzymatch"),
