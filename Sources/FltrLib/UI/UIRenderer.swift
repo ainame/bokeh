@@ -24,8 +24,8 @@ struct UIRenderer: Sendable {
         let (rows, cols) = (context.rows, context.cols)
 
         // Calculate available rows for items
-        // Layout: row 1 = input, row 2 = border, rows 3..N = items, row N+1 = status
-        let availableRows = rows - 4  // 1 for input, 1 for border, 1 for status, 1 for spacing
+        // Layout: row 1 = input, row 2 = status, row 3 = border, rows 4..N = items.
+        let availableRows = rows - 4  // input, status, border, and one spare row
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
         // Calculate layout based on preview mode
@@ -52,8 +52,23 @@ struct UIRenderer: Sendable {
         // Render input line (positions itself) - use full width
         frame += renderInputLine(query: state.query, cursorPosition: state.cursorPosition, cols: cols)
 
-        // Render border line below input - use full width
-        frame += renderBorderLine(cols: cols)
+        // Render status directly below the query so loaded-item and search
+        // progress feedback remains visible while the list is changing.
+        frame += renderStatusBar(
+            matchedCount: state.matchCount,
+            totalItems: state.totalItems,
+            selectedItems: state.selectedItems,
+            isReadingStdin: context.isReadingStdin,
+            searchProgress: context.searchProgress,
+            scrollOffset: state.scrollOffset,
+            displayHeight: displayHeight,
+            row: 2,
+            cols: listWidth,
+            spinnerFrame: context.spinnerFrame
+        )
+
+        // Render the list divider below the status.
+        frame += renderBorderLine(row: 3, cols: cols)
 
         // Render matched items (positions each line)
         frame += renderItemList(
@@ -71,24 +86,10 @@ struct UIRenderer: Sendable {
                 matchedCount: state.matchCount,
                 scrollOffset: state.scrollOffset,
                 displayHeight: displayHeight,
-                row: 3,
+                row: 4,
                 col: listWidth
             )
         }
-
-        // Render status bar (positions itself)
-        frame += renderStatusBar(
-            matchedCount: state.matchCount,
-            totalItems: state.totalItems,
-            selectedItems: state.selectedItems,
-            isReadingStdin: context.isReadingStdin,
-            searchProgress: context.searchProgress,
-            scrollOffset: state.scrollOffset,
-            displayHeight: displayHeight,
-            row: visibleItems.count + 3,
-            cols: listWidth,
-            spinnerFrame: context.spinnerFrame
-        )
 
         // Keep terminal cursor anchored to the prompt caret position.
         // IME candidate UI follows the terminal cursor location.
@@ -135,8 +136,8 @@ struct UIRenderer: Sendable {
     }
 
     /// Render horizontal border line
-    private func renderBorderLine(cols: Int) -> String {
-        return Self.separator.render(row: 2, width: cols)
+    private func renderBorderLine(row: Int, cols: Int) -> String {
+        return Self.separator.render(row: row, width: cols)
     }
 
     /// Render item list with highlighting.
@@ -153,7 +154,7 @@ struct UIRenderer: Sendable {
     ) -> String {
         var buffer = ""
         for (displayIndex, matchedItem) in visibleItems.enumerated() {
-            let row = displayIndex + 3  // Start from row 3 (after input on row 1 and border on row 2)
+            let row = displayIndex + 4  // Below input, status, and border.
             let actualIndex = scrollOffset + displayIndex
 
             let isSelected = selectedIndex == actualIndex

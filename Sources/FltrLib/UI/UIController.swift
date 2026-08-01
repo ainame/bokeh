@@ -54,7 +54,7 @@ private enum FrameBuilder {
 
         var previewBounds: Bounds?
         if snapshot.context.showSplitPreview, let manager = snapshot.previewManager {
-            let startRow = 3
+            let startRow = 4
             let endRow = max(5, snapshot.context.rows) - 2
             let listWidth = snapshot.context.cols / 2 - 1
             let previewStartCol = listWidth + 2
@@ -560,7 +560,7 @@ actor UIController {
         let rows = max(5, rawSize.0)
         let cols = max(10, rawSize.1)
 
-        // Layout: input | border | items… | status  →  4 rows of chrome
+        // Layout: input | status | border | items…  →  4 rows of chrome
         let availableRows = rows - 4
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 

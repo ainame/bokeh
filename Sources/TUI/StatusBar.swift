@@ -73,7 +73,13 @@ public struct StatusBar: Sendable {
         }
 
         if let completed = config.searchProgressCompleted {
-            status += " · searching \(completed)/\(config.searchProgressTotal)"
+            let percent: Int
+            if config.searchProgressTotal > 0 {
+                percent = min(100, max(0, completed * 100 / config.searchProgressTotal))
+            } else {
+                percent = 0
+            }
+            status += " [\(percent)%]"
         }
         
         return ANSIColors.moveCursor(row: config.row, col: 1) + 

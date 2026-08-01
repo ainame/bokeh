@@ -77,7 +77,8 @@ func rendererShowsSearchProgress() {
         buffer: TextBuffer()
     )
 
-    #expect(frame.contains("searching 128/500"))
+    #expect(frame.contains("[25%]"))
+    #expect(frame.contains("\u{001B}[2;1H"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")
@@ -104,7 +105,7 @@ func rendererUsesViewportScrollbar() {
         context: context,
         buffer: TextBuffer()
     )
-    #expect(topFrame.contains("\u{001B}[3;40H█"))
+    #expect(topFrame.contains("\u{001B}[4;40H█"))
     #expect(!topFrame.contains("[0%]"))
 
     state.scrollOffset = 46  // Halfway through the 92-row scroll range.
@@ -115,7 +116,7 @@ func rendererUsesViewportScrollbar() {
         context: context,
         buffer: TextBuffer()
     )
-    #expect(middleFrame.contains("\u{001B}[6;40H█"))
+    #expect(middleFrame.contains("\u{001B}[7;40H█"))
 
     state.scrollOffset = 92
     let bottomFrame = renderer.assembleFrame(
@@ -125,7 +126,7 @@ func rendererUsesViewportScrollbar() {
         context: context,
         buffer: TextBuffer()
     )
-    #expect(bottomFrame.contains("\u{001B}[10;40H█"))
+    #expect(bottomFrame.contains("\u{001B}[11;40H█"))
 
     state.matchCount = 8  // Fits exactly in the eight-row viewport.
     state.scrollOffset = 0
