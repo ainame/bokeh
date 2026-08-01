@@ -58,13 +58,21 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: "6.3.3"
+      - name: Install Swift 6.3.3
+        env:
+          SWIFTLY_HOME_DIR: ${{ runner.temp }}/swiftly
+          SWIFTLY_BIN_DIR: ${{ runner.temp }}/swiftly-bin
+        run: |
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
+          tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
+          ./swiftly init --quiet-shell-followup
+          "${SWIFTLY_BIN_DIR}/swiftly" install 6.3.3
+          "${SWIFTLY_BIN_DIR}/swiftly" run swift --version
+          echo "${SWIFTLY_BIN_DIR}" >> "${GITHUB_PATH}"
 
       - name: Install Swift Static Linux SDK
         run: |
-          swift sdk install \
+          swiftly run swift sdk install \
             https://download.swift.org/swift-6.3.3-release/static-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
             --checksum 87c3eaf908e67c0e13a84367119e12273cec1d2cd3d81f7d74bb36722d6b607b
 
