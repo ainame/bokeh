@@ -38,6 +38,7 @@ jobs:
         run: |
           curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
           installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          "${HOME}/.swiftly/bin/swiftly" init --quiet-shell-followup
           . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
           swiftly install "$(<.swift-version)"
           swiftly run swift --version
@@ -70,6 +71,7 @@ jobs:
         run: |
           curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
           installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          "${HOME}/.swiftly/bin/swiftly" init --quiet-shell-followup
           . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
           swiftly install "$(<.swift-version)"
           swiftly run swift --version
@@ -105,6 +107,7 @@ jobs:
         run: |
           curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
           installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          "${HOME}/.swiftly/bin/swiftly" init --quiet-shell-followup
           . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
           swiftly install "$(<.swift-version)"
           swiftly run swift --version
