@@ -99,6 +99,7 @@ actor UIController {
     private let reader: StdinReader
     private var state = UIState()
     private var maxHeight: Int?  // nil = use full terminal height
+    private var terminalSize: (rows: Int, cols: Int) = (24, 80)
     private var lastItemCount: Int = 0
     private var isReadingStdin: Bool = true  // Cache to avoid async call in render
     private var spinnerFrame: Int = 0  // Spinner animation frame counter
@@ -154,6 +155,7 @@ actor UIController {
     /// Run the main UI loop
     func run() async throws -> [Item] {
         try await terminal.enterRawMode()
+        terminalSize = (try? await terminal.getSize()) ?? terminalSize
 
         // Initial snapshot — may be empty if stdin is still streaming.
         let initialChunkList = await cache.snapshotChunkList()
@@ -166,7 +168,7 @@ actor UIController {
         // Install its reducer before the first prompt is published: terminal
         // output is asynchronous, so a user may type as soon as it appears.
         let inputEvents = await terminal.inputEvents()
-        inputTask = Task { [weak self] in
+        inputTask = Task(priority: .high) { [weak self] in
             for await key in inputEvents {
                 guard !Task.isCancelled else { return }
                 await self?.handleKey(key: key)
@@ -259,8 +261,8 @@ actor UIController {
         return state.getSelectedItems()
     }
 
-    private func handleKey(key: Key) async {
-        let (rows, cols) = (try? await terminal.getSize()) ?? (24, 80)
+    private func handleKey(key: Key) {
+        let (rows, cols) = terminalSize
         let availableRows = rows - 4  // input + border + status + spacing
         let visibleHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
@@ -280,13 +282,13 @@ actor UIController {
                 if key == .tab {
                     scheduleRender()
                 } else {
-                    await renderPrompt(cols: cols)
+                    renderPrompt(cols: cols)
                 }
             }
 
         case .scheduleMatchUpdate:
             scheduleMatchUpdate()
-            await renderPrompt(cols: cols)
+            renderPrompt(cols: cols)
 
         case .updatePreview:
             refreshPreview()
@@ -403,7 +405,7 @@ actor UIController {
     /// Repaint only the prompt while a new search is running. This executes in
     /// the current key action, avoiding an extra task-scheduling and terminal-
     /// size round trip on the typing path.
-    private func renderPrompt(cols: Int) async {
+    private func renderPrompt(cols: Int) {
         renderGeneration &+= 1
         currentFrameTask?.cancel()
         pendingResultRenderTask?.cancel()
@@ -523,6 +525,7 @@ actor UIController {
     private func render(generation: UInt) async {
         guard !isExiting else { return }
         let rawSize = (try? await terminal.getSize()) ?? (24, 80)
+        terminalSize = rawSize
         let rows = max(5, rawSize.0)
         let cols = max(10, rawSize.1)
 

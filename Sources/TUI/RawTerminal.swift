@@ -291,7 +291,7 @@ public actor RawTerminal: Terminal {
     /// Keep it in a dedicated detached task so RawTerminal can still service
     /// output and UIController can consume already-decoded events.
     private func startInputPump(fd: FileDescriptor, generation: UInt, session: TerminalInputSession) {
-        inputPumpTask = Task.detached { [weak self, session] in
+        inputPumpTask = Task.detached(priority: .high) { [weak self, session] in
             defer { try? fd.close() }
             var decoder = InputDecoder()
             while !Task.isCancelled {
@@ -408,9 +408,15 @@ private final class TerminalOutputHub: @unchecked Sendable {
 /// `close` cancels that task; writes use O_NONBLOCK and 20 ms poll slices, so
 /// teardown cannot wait indefinitely for a backpressured terminal.
 private final class TerminalOutputSession: @unchecked Sendable {
+    private struct PendingFrame {
+        let generation: UInt
+        let buffer: String
+    }
+
     private struct State {
         var accepting = true
-        var pending: String?
+        var generation: UInt = 0
+        var pending: PendingFrame?
     }
 
     private final class Mailbox: @unchecked Sendable {
@@ -434,11 +440,13 @@ private final class TerminalOutputSession: @unchecked Sendable {
             defer { try? fd.close() }
             for await _ in signals {
                 guard !Task.isCancelled else { return }
-                guard let frame = mailbox.state.withLock({ state -> String? in
+                guard let frame = mailbox.state.withLock({ state -> PendingFrame? in
                     defer { state.pending = nil }
                     return state.accepting ? state.pending : nil
                 }) else { continue }
-                Self.write(frame, to: fd)
+                Self.write(frame.buffer, to: fd) {
+                    mailbox.state.withLock { $0.generation == frame.generation }
+                }
             }
         }
     }
@@ -446,7 +454,8 @@ private final class TerminalOutputSession: @unchecked Sendable {
     func publish(_ frame: String) {
         let shouldSignal = mailbox.state.withLock { state in
             guard state.accepting else { return false }
-            state.pending = frame
+            state.generation &+= 1
+            state.pending = PendingFrame(generation: state.generation, buffer: frame)
             return true
         }
         if shouldSignal { continuation.yield() }
@@ -477,12 +486,14 @@ private final class TerminalOutputSession: @unchecked Sendable {
     fileprivate static func write(
         _ frame: String,
         to fd: FileDescriptor,
-        maximumStalledPolls: Int? = nil
+        maximumStalledPolls: Int? = nil,
+        isCurrent: (() -> Bool)? = nil
     ) {
         let bytes = Array(frame.utf8)
         var offset = 0
         var stalledPolls = 0
         while offset < bytes.count, !Task.isCancelled {
+            guard isCurrent?() ?? true else { return }
             let written = bytes.withUnsafeBytes { buffer in
                 fltr_write_bytes(fd.rawValue, buffer.baseAddress!.advanced(by: offset), bytes.count - offset)
             }
