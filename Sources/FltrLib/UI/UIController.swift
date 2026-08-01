@@ -113,9 +113,11 @@ actor UIController {
     private var fetchItemsTask: Task<Void, Never>?
     private var matchGeneration: UInt = 0
     private var currentFrameTask: Task<RenderedFrame?, Never>?
+    private var pendingResultRenderTask: Task<Void, Never>?
     private var renderGeneration: UInt = 0
 
-    private var renderScheduled = false  // coalesces concurrent render requests
+    private var renderScheduled = false
+    private var needsFullRender = false
 
     private var mergerCache = MergerCache()
 
@@ -242,6 +244,7 @@ actor UIController {
         currentPreviewTask?.cancel()
         fetchItemsTask?.cancel()
         currentFrameTask?.cancel()
+        pendingResultRenderTask?.cancel()
         await terminal.exitRawMode()
 
         return state.getSelectedItems()
@@ -356,18 +359,35 @@ actor UIController {
     }
 
     private func scheduleRender() {
+        needsFullRender = true
         renderGeneration &+= 1
         currentFrameTask?.cancel()
         guard !renderScheduled else { return }
         renderScheduled = true
 
         Task {
-            let generation = renderGeneration
-            await render(generation: generation)
-            renderScheduled = false
-            if generation != renderGeneration {
-                scheduleRender()
+            while needsFullRender {
+                needsFullRender = false
+                await render(generation: renderGeneration)
             }
+            renderScheduled = false
+        }
+    }
+
+    /// Coalesce list refreshes caused by fast successive search completions.
+    /// Prompt updates are rendered immediately; the expensive full frame is
+    /// produced only after typing has paused for one short frame interval.
+    private func scheduleResultRender() {
+        pendingResultRenderTask?.cancel()
+        pendingResultRenderTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(16))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            pendingResultRenderTask = nil
+            scheduleRender()
         }
     }
 
@@ -377,6 +397,7 @@ actor UIController {
     private func renderPrompt(cols: Int) async {
         renderGeneration &+= 1
         currentFrameTask?.cancel()
+        pendingResultRenderTask?.cancel()
         guard !isExiting else { return }
         let prompt = renderer.renderInputLine(
             query: state.query,
@@ -417,7 +438,7 @@ actor UIController {
                   await applyMatchResults(cached, query: normalizedQuery, generation: generation)
             else { return }
             await refreshPreviewIfNeeded(results: cached)
-            await scheduleRender()
+            await scheduleResultRender()
             return
         }
 
@@ -445,7 +466,7 @@ actor UIController {
 
         guard await applyMatchResults(results, query: normalizedQuery, generation: generation) else { return }
         await refreshPreviewIfNeeded(results: results)
-        await scheduleRender()
+        await scheduleResultRender()
     }
 
     /// Update the cached preview when there are results to show.
