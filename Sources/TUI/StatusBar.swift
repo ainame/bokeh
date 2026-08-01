@@ -71,9 +71,9 @@ public struct StatusBar: Sendable {
     /// This lets a caller overlay the status on a separator without clearing
     /// the rest of that line.
     public func content(config: Config) -> String {
-        // Keep the count aligned across state changes: both the spinner and
-        // ready tick occupy one terminal cell followed by one space.
-        let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : "✓ "
+        // Keep the count aligned across state changes: reserve the spinner's
+        // cell plus its trailing space even when the status is idle.
+        let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : "  "
         
         let totalText = String(config.totalCount)
         let matchedText = String(config.matchedCount)

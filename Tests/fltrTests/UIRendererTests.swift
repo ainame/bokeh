@@ -81,8 +81,8 @@ func rendererShowsSearchProgress() {
     #expect(frame.contains("\u{001B}[2;1H"))
 }
 
-@Test("Renderer keeps a fixed ready indicator beside the count")
-func rendererShowsReadyTick() {
+@Test("Renderer keeps a fixed idle placeholder beside the count")
+func rendererKeepsIdlePlaceholder() {
     let renderer = UIRenderer(maxHeight: nil, multiSelect: false)
     let frame = renderer.assembleFrame(
         state: UIState(),
@@ -100,7 +100,7 @@ func rendererShowsReadyTick() {
         buffer: TextBuffer()
     )
 
-    #expect(frame.contains("✓ 0 / 0"))
+    #expect(frame.contains("  0 / 0"))
     #expect(frame.contains("\u{001B}[2;1H"))
 }
 
@@ -127,7 +127,7 @@ func rendererRightAlignsMatchCount() {
         buffer: TextBuffer()
     )
 
-    #expect(frame.contains("✓     12 / 123456"))
+    #expect(frame.contains("      12 / 123456"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")
