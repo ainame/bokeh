@@ -61,21 +61,23 @@ jobs:
 
   generate-sboms:
     name: Generate SBOMs
-    runs-on: macos-26
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Setup Swift
+      - name: Read Swift version
         run: |
-          curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
-          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
-          "${HOME}/.swiftly/bin/swiftly" init --quiet-shell-followup
-          . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
-          swiftly install "$(<.swift-version)"
-          swiftly run swift --version
-          dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
+          echo "SWIFT_VERSION=$(<.swift-version)" >> "${GITHUB_ENV}"
+
+      - name: Setup Swift
+        uses: vapor/swiftly-action@v0.2
+        with:
+          toolchain: ${{ env.SWIFT_VERSION }}
+
+      - name: Show Swift version
+        run: swift --version
 
       - name: Generate release SBOMs
         run: scripts/generate_sboms.sh dist
