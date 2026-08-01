@@ -20,8 +20,8 @@ public actor RawTerminal: Terminal {
     private var isRawMode = false
     private var inputPumpTask: Task<Void, Never>?
     private var inputGeneration: UInt = 0
-    private let inputChannel = TerminalInputChannel()
-    private let outputWriter = TerminalOutputWriter()
+    private var inputSession: TerminalInputSession?
+    private let outputHub = TerminalOutputHub()
     public private(set) var ttyBroken = false  // set on fatal read error (EIO/EBADF)
 
     // Cleanup state that needs to be accessed from nonisolated context (protected by Mutex)
@@ -51,6 +51,7 @@ public actor RawTerminal: Terminal {
 
     deinit {
         inputPumpTask?.cancel()
+        outputHub.abandon()
         // Safety net: ensure terminal is restored even if exitRawMode() wasn't called
         performCleanup()
     }
@@ -82,9 +83,11 @@ public actor RawTerminal: Terminal {
             try? inputFd.close()
             throw TerminalError.failedToOpenTTY
         }
-        self.inputFd = inputFd
-        self.outputFd = outputFd
-
+        guard fltr_fd_set_nonblocking(outputFd.rawValue) == 0 else {
+            try? inputFd.close()
+            try? outputFd.close()
+            throw TerminalError.ioError(.invalidArgument)
+        }
         var raw = termios()
         guard tcgetattr(inputFd.rawValue, &raw) == 0 else {
             try? inputFd.close()
@@ -118,15 +121,57 @@ public actor RawTerminal: Terminal {
             $0 = CleanupState(inputFd: inputFd, outputFd: outputFd, termios: originalTermios!)
         }
 
-        // Setup must complete before frames are accepted. Normal UI output is
-        // then owned by the separate writer actor.
-        _ = try? outputFd.writeAll("\u{001B}[?1049h\u{001B}[?25l\u{001B}[?1000h\u{001B}[?1006h\u{001B}[2J".utf8)
-        await outputWriter.start(fd: outputFd)
+        let readerFd: FileDescriptor
+        do {
+            readerFd = try FileDescriptor.open("/dev/tty", .readOnly)
+        } catch {
+            var original = originalTermios!
+            tcsetattr(inputFd.rawValue, TCSANOW, &original)
+            try? inputFd.close()
+            try? outputFd.close()
+            cleanupState.withLock { $0 = nil }
+            throw TerminalError.failedToOpenTTY
+        }
+        let writerFd: FileDescriptor
+        do {
+            writerFd = try FileDescriptor.open("/dev/tty", .writeOnly)
+        } catch {
+            try? readerFd.close()
+            var original = originalTermios!
+            tcsetattr(inputFd.rawValue, TCSANOW, &original)
+            try? inputFd.close()
+            try? outputFd.close()
+            cleanupState.withLock { $0 = nil }
+            throw TerminalError.failedToOpenTTY
+        }
+        guard fltr_fd_set_nonblocking(writerFd.rawValue) == 0 else {
+            try? writerFd.close()
+            try? readerFd.close()
+            var original = originalTermios!
+            tcsetattr(inputFd.rawValue, TCSANOW, &original)
+            try? inputFd.close()
+            try? outputFd.close()
+            cleanupState.withLock { $0 = nil }
+            throw TerminalError.ioError(.invalidArgument)
+        }
 
+        // Setup must complete before frames are accepted. Normal UI output is
+        // then owned by the non-blocking writer session.
+        TerminalOutputSession.write(
+            "\u{001B}[?1049h\u{001B}[?25l\u{001B}[?1000h\u{001B}[?1006h\u{001B}[2J",
+            to: outputFd,
+            maximumStalledPolls: 5
+        )
+        outputHub.open(fd: writerFd)
+
+        self.inputFd = inputFd
+        self.outputFd = outputFd
         isRawMode = true
         ttyBroken = false
         inputGeneration &+= 1
-        startInputPump(fd: inputFd, generation: inputGeneration)
+        let inputSession = TerminalInputSession()
+        self.inputSession = inputSession
+        startInputPump(fd: readerFd, generation: inputGeneration, session: inputSession)
     }
 
     /// Exits raw mode and restores original terminal state.
@@ -138,6 +183,7 @@ public actor RawTerminal: Terminal {
 
         inputGeneration &+= 1
         inputPumpTask?.cancel()
+        inputSession?.finish()
         if let inputPumpTask {
             // The reader uses VTIME=1, so cancellation becomes observable
             // within 100 ms. Joining it avoids Darwin blocking `close` while
@@ -146,9 +192,19 @@ public actor RawTerminal: Terminal {
         }
         inputPumpTask = nil
 
-        // Serialise cleanup after all queued frames, so a stale frame cannot
-        // be written after leaving the alternate screen.
-        await outputWriter.stop(finalSequence: "\u{001B}[?1006l\u{001B}[?1000l\u{001B}[?25h\u{001B}[?1049l")
+        // The writer owns a separate non-blocking fd. Joining it is bounded
+        // even when the terminal stops accepting output.
+        await outputHub.close()
+
+        // No writer can touch this control descriptor. Cleanup remains ordered
+        // after the writer has stopped and cannot race a stale frame.
+        if let outputFd {
+            TerminalOutputSession.write(
+                "\u{001B}[?1006l\u{001B}[?1000l\u{001B}[?25h\u{001B}[?1049l",
+                to: outputFd,
+                maximumStalledPolls: 5
+            )
+        }
 
         if let inputFd, var original = originalTermios {
             // The output writer has already been joined above. Do not use
@@ -164,6 +220,7 @@ public actor RawTerminal: Terminal {
         isRawMode = false
         self.inputFd = nil
         self.outputFd = nil
+        inputSession = nil
 
         // Clear cleanup state since we've cleaned up properly
         cleanupState.withLock { $0 = nil }
@@ -179,10 +236,11 @@ public actor RawTerminal: Terminal {
 
         guard let state else { return }
 
-        // Write cleanup sequences directly to fd
+        // The writer has its own descriptor and is abandoned above, so it
+        // cannot race these control writes. The input worker has its own fd,
+        // so these control descriptors are safe to close during deinit.
         let cleanupSequence = "\u{001B}[?1006l\u{001B}[?1000l\u{001B}[?25h\u{001B}[?1049l"
-        _ = try? state.outputFd.writeAll(cleanupSequence.utf8)
-        fsync(state.outputFd.rawValue)
+        TerminalOutputSession.write(cleanupSequence, to: state.outputFd, maximumStalledPolls: 5)
 
         // Restore terminal attributes
         var termios = state.termios
@@ -213,8 +271,7 @@ public actor RawTerminal: Terminal {
     ///
     /// - Parameter string: The string to write
     public nonisolated func write(_ string: String) {
-        let writer = outputWriter
-        Task { await writer.write(string) }
+        outputHub.publish(string)
     }
 
     /// Flushes terminal output buffer.
@@ -227,15 +284,15 @@ public actor RawTerminal: Terminal {
     /// A lossless stream of decoded input events. The dedicated byte reader
     /// owns the decoder and publishes directly to this stream.
     public func inputEvents() -> AsyncStream<Key> {
-        inputChannel.stream
+        inputSession?.stream ?? AsyncStream { $0.finish() }
     }
 
     /// The POSIX read has a VTIME timeout and can block the executing thread.
     /// Keep it in a dedicated detached task so RawTerminal can still service
     /// output and UIController can consume already-decoded events.
-    private func startInputPump(fd: FileDescriptor, generation: UInt) {
-        let inputChannel = inputChannel
-        inputPumpTask = Task.detached { [weak self, inputChannel] in
+    private func startInputPump(fd: FileDescriptor, generation: UInt, session: TerminalInputSession) {
+        inputPumpTask = Task.detached { [weak self, session] in
+            defer { try? fd.close() }
             var decoder = InputDecoder()
             while !Task.isCancelled {
                 let read = Self.readRawByte(from: fd)
@@ -243,11 +300,12 @@ public actor RawTerminal: Terminal {
                 case .byte(let byte): decoder.feed(byte)
                 case .timeout: decoder.handleTimeout()
                 case .broken:
+                    session.finish()
                     await self?.markTTYBroken(generation: generation)
                     return
                 }
                 while let key = decoder.nextEvent() {
-                    inputChannel.yield(key)
+                    session.yield(key)
                 }
             }
         }
@@ -294,8 +352,9 @@ public actor RawTerminal: Terminal {
     }
 }
 
-/// Thread-safe bridge from detached byte reading to the UI reducer.
-private final class TerminalInputChannel: @unchecked Sendable {
+/// A single raw-mode input session. Its continuation is thread-safe; each
+/// session is explicitly finished on terminal exit or reader failure.
+private final class TerminalInputSession: @unchecked Sendable {
     let stream: AsyncStream<Key>
     private let continuation: AsyncStream<Key>.Continuation
 
@@ -306,50 +365,139 @@ private final class TerminalInputChannel: @unchecked Sendable {
     }
 
     func yield(_ key: Key) { continuation.yield(key) }
+    func finish() { continuation.finish() }
 }
 
-/// Owns blocking interactive writes independently from input and state. The
-/// one-slot mailbox makes output latest-wins: when the terminal is slow, a
-/// burst of prompt/frame updates cannot become a backlog that is rendered
-/// long after the user has moved on.
-private actor TerminalOutputWriter {
-    private var fd: FileDescriptor?
-    private var acceptingFrames = false
-    private var continuation: AsyncStream<String>.Continuation?
-    private var writerTask: Task<Void, Never>?
+/// Nonisolated producer boundary for terminal frames. `publish` replaces the
+/// pending frame while holding only a short mutex; it never creates a task.
+/// The dedicated session below is the sole owner of the write descriptor.
+private final class TerminalOutputHub: @unchecked Sendable {
+    private let state = Mutex<TerminalOutputSession?>(nil)
 
-    func start(fd: FileDescriptor) {
-        self.fd = fd
-        acceptingFrames = true
-        var captured: AsyncStream<String>.Continuation!
-        let stream = AsyncStream<String>(bufferingPolicy: .bufferingNewest(1)) {
-            captured = $0
+    func open(fd: FileDescriptor) {
+        let session = TerminalOutputSession(fd: fd)
+        state.withLock { current in
+            precondition(current == nil, "terminal output session already active")
+            current = session
         }
+    }
+
+    func publish(_ frame: String) {
+        let session = state.withLock { $0 }
+        session?.publish(frame)
+    }
+
+    func close() async {
+        let session = state.withLock { current -> TerminalOutputSession? in
+            defer { current = nil }
+            return current
+        }
+        await session?.close()
+    }
+
+    nonisolated func abandon() {
+        let session = state.withLock { current -> TerminalOutputSession? in
+            defer { current = nil }
+            return current
+        }
+        session?.abandon()
+    }
+}
+
+/// Latest-wins mailbox plus the one task allowed to write a session's fd.
+/// `close` cancels that task; writes use O_NONBLOCK and 20 ms poll slices, so
+/// teardown cannot wait indefinitely for a backpressured terminal.
+private final class TerminalOutputSession: @unchecked Sendable {
+    private struct State {
+        var accepting = true
+        var pending: String?
+    }
+
+    private final class Mailbox: @unchecked Sendable {
+        let state = Mutex(State())
+    }
+
+    private let mailbox = Mailbox()
+    private let signals: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+    private var writerTask: Task<Void, Never>?
+    private let fd: FileDescriptor
+
+    init(fd: FileDescriptor) {
+        self.fd = fd
+        var captured: AsyncStream<Void>.Continuation!
+        signals = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { captured = $0 }
         continuation = captured
+        let mailbox = self.mailbox
+        let signals = self.signals
         writerTask = Task.detached {
-            for await frame in stream {
+            defer { try? fd.close() }
+            for await _ in signals {
                 guard !Task.isCancelled else { return }
-                _ = try? fd.writeAll(frame.utf8)
+                guard let frame = mailbox.state.withLock({ state -> String? in
+                    defer { state.pending = nil }
+                    return state.accepting ? state.pending : nil
+                }) else { continue }
+                Self.write(frame, to: fd)
             }
         }
     }
 
-    func write(_ string: String) {
-        guard acceptingFrames else { return }
-        continuation?.yield(string)
+    func publish(_ frame: String) {
+        let shouldSignal = mailbox.state.withLock { state in
+            guard state.accepting else { return false }
+            state.pending = frame
+            return true
+        }
+        if shouldSignal { continuation.yield() }
     }
 
-    func stop(finalSequence: String) async {
-        guard let fd else { return }
-        acceptingFrames = false
-        writerTask?.cancel()
-        continuation?.finish()
-        if let writerTask {
-            await writerTask.value
+    func close() async {
+        mailbox.state.withLock {
+            $0.accepting = false
+            $0.pending = nil
         }
+        writerTask?.cancel()
+        continuation.finish()
+        if let writerTask { await writerTask.value }
         writerTask = nil
-        continuation = nil
-        _ = try? fd.writeAll(finalSequence.utf8)
-        self.fd = nil
+    }
+
+    func abandon() {
+        mailbox.state.withLock {
+            $0.accepting = false
+            $0.pending = nil
+        }
+        writerTask?.cancel()
+        continuation.finish()
+        // The worker owns fd and closes it in its defer once cancellation
+        // reaches the next bounded poll slice.
+    }
+
+    fileprivate static func write(
+        _ frame: String,
+        to fd: FileDescriptor,
+        maximumStalledPolls: Int? = nil
+    ) {
+        let bytes = Array(frame.utf8)
+        var offset = 0
+        var stalledPolls = 0
+        while offset < bytes.count, !Task.isCancelled {
+            let written = bytes.withUnsafeBytes { buffer in
+                fltr_write_bytes(fd.rawValue, buffer.baseAddress!.advanced(by: offset), bytes.count - offset)
+            }
+            if written > 0 {
+                offset += Int(written)
+                stalledPolls = 0
+            } else if written == 0 || fltr_errno_is_would_block() != 0 {
+                _ = fltr_wait_writable(fd.rawValue, 20)
+                stalledPolls += 1
+                // A normal frame must eventually complete rather than leave a
+                // partial ANSI redraw. Teardown/setup pass a finite bound.
+                if let maximumStalledPolls, stalledPolls == maximumStalledPolls { return }
+            } else if fltr_errno_is_interrupted() == 0 {
+                return
+            }
+        }
     }
 }

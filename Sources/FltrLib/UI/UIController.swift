@@ -250,6 +250,10 @@ actor UIController {
         currentFrameTask?.cancel()
         pendingResultRenderTask?.cancel()
         inputTask?.cancel()
+        if let inputTask {
+            await inputTask.value
+        }
+        inputTask = nil
         await terminal.exitRawMode()
 
         return state.getSelectedItems()
