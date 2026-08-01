@@ -51,8 +51,12 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Build static Linux (x86_64)
+    name: Build static Linux (${{ matrix.arch }})
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,25 +79,25 @@ jobs:
             --checksum 87c3eaf908e67c0e13a84367119e12273cec1d2cd3d81f7d74bb36722d6b607b
 
       - name: Build static release binary with mimalloc
-        run: ARCH=x86_64 make linux
+        run: ARCH=${{ matrix.arch }} make linux
 
       - name: Verify static binary
         run: |
-          file .build/x86_64-swift-linux-musl/release/fltr | grep -F "statically linked"
-          nm .build/x86_64-swift-linux-musl/release/fltr | grep -E '[[:space:]]mi_malloc$'
+          file .build/${{ matrix.arch }}-swift-linux-musl/release/fltr | grep -F "statically linked"
+          nm .build/${{ matrix.arch }}-swift-linux-musl/release/fltr | grep -E '[[:space:]]mi_malloc$'
 
       - name: Package binary
         run: |
           mkdir dist
-          cp .build/x86_64-swift-linux-musl/release/fltr dist/fltr
+          cp .build/${{ matrix.arch }}-swift-linux-musl/release/fltr dist/fltr
           cp LICENSES/mimalloc-MIT.txt dist/LICENSE-mimalloc.txt
-          tar -C dist -czf fltr-linux-x86_64.tar.gz fltr LICENSE-mimalloc.txt
+          tar -C dist -czf fltr-linux-${{ matrix.arch }}.tar.gz fltr LICENSE-mimalloc.txt
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
-          name: fltr-linux-x86_64
-          path: fltr-linux-x86_64.tar.gz
+          name: fltr-linux-${{ matrix.arch }}
+          path: fltr-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   publish:

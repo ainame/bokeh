@@ -29,7 +29,7 @@ To install this release specifically:
 mise use -g github:ainame/fltr@0.1.0
 ```
 
-mise selects the archive matching your Apple Silicon (`arm64`) or Intel (`x86_64`) Mac, or x86_64 Linux machine, and places `fltr` on your PATH.
+mise selects the archive matching your Apple Silicon (`arm64`) or Intel (`x86_64`) Mac, or your `aarch64`/`x86_64` Linux machine, and places `fltr` on your PATH.
 
 ### Local install (host platform)
 
@@ -42,8 +42,7 @@ cp .build/release/fltr /usr/local/bin/
 
 ### Build Linux static binary (musl + Static Linux SDK)
 
-`make linux` builds `fltr` for Linux using the Swift Static Linux SDK, whose static libc includes `mimalloc`.
-The Linux release archive includes mimalloc's MIT license as `LICENSE-mimalloc.txt`.
+`make linux` builds `fltr` for Linux using the Swift Static Linux SDK, whose static libc includes `mimalloc`. The release includes static `aarch64` and `x86_64` Linux archives; each includes mimalloc's MIT license as `LICENSE-mimalloc.txt`.
 
 ```bash
 git clone <repository-url>
