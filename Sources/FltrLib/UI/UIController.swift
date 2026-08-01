@@ -560,7 +560,7 @@ actor UIController {
         let rows = max(5, rawSize.0)
         let cols = max(10, rawSize.1)
 
-        // Layout: input | status | border | items…  →  4 rows of chrome
+        // Layout: input | border | status | items…  →  4 rows of chrome
         let availableRows = rows - 4
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 

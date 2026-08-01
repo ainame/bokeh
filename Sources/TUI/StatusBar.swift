@@ -62,8 +62,9 @@ public struct StatusBar: Sendable {
     /// - Parameter config: Status bar configuration
     /// - Returns: ANSI-formatted string for the status bar
     public func render(config: Config) -> String {
-        // Show spinner on the left if loading
-        let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : ""
+        // Keep the count aligned across state changes: both the spinner and
+        // ready tick occupy one terminal cell followed by one space.
+        let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : "✓ "
         
         var status: String
         if config.selectedCount == 0 {

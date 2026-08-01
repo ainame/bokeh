@@ -24,8 +24,8 @@ struct UIRenderer: Sendable {
         let (rows, cols) = (context.rows, context.cols)
 
         // Calculate available rows for items
-        // Layout: row 1 = input, row 2 = status, row 3 = border, rows 4..N = items.
-        let availableRows = rows - 4  // input, status, border, and one spare row
+        // Layout: row 1 = input, row 2 = border, row 3 = status, rows 4..N = items.
+        let availableRows = rows - 4  // input, border, status, and one spare row
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
         // Calculate layout based on preview mode
@@ -52,8 +52,11 @@ struct UIRenderer: Sendable {
         // Render input line (positions itself) - use full width
         frame += renderInputLine(query: state.query, cursorPosition: state.cursorPosition, cols: cols)
 
-        // Render status directly below the query so loaded-item and search
-        // progress feedback remains visible while the list is changing.
+        // Render the divider directly below the query.
+        frame += renderBorderLine(row: 2, cols: cols)
+
+        // Keep loaded-item and search-progress feedback in a stable status row
+        // above the result list.
         frame += renderStatusBar(
             matchedCount: state.matchCount,
             totalItems: state.totalItems,
@@ -62,13 +65,10 @@ struct UIRenderer: Sendable {
             searchProgress: context.searchProgress,
             scrollOffset: state.scrollOffset,
             displayHeight: displayHeight,
-            row: 2,
+            row: 3,
             cols: listWidth,
             spinnerFrame: context.spinnerFrame
         )
-
-        // Render the list divider below the status.
-        frame += renderBorderLine(row: 3, cols: cols)
 
         // Render matched items (positions each line)
         frame += renderItemList(

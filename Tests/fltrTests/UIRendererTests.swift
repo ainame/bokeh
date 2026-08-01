@@ -78,7 +78,30 @@ func rendererShowsSearchProgress() {
     )
 
     #expect(frame.contains("[25%]"))
-    #expect(frame.contains("\u{001B}[2;1H"))
+    #expect(frame.contains("\u{001B}[3;1H"))
+}
+
+@Test("Renderer keeps a fixed ready indicator beside the count")
+func rendererShowsReadyTick() {
+    let renderer = UIRenderer(maxHeight: nil, multiSelect: false)
+    let frame = renderer.assembleFrame(
+        state: UIState(),
+        visibleItems: [],
+        highlightPositions: [:],
+        context: RenderContext(
+            rows: 12,
+            cols: 80,
+            isReadingStdin: false,
+            searchProgress: nil,
+            showSplitPreview: false,
+            showFloatingPreview: false,
+            spinnerFrame: 0
+        ),
+        buffer: TextBuffer()
+    )
+
+    #expect(frame.contains("✓ 0/0"))
+    #expect(frame.contains("\u{001B}[3;1H"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")
