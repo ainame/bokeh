@@ -54,7 +54,7 @@ private enum FrameBuilder {
 
         var previewBounds: Bounds?
         if snapshot.context.showSplitPreview, let manager = snapshot.previewManager {
-            let startRow = 4
+            let startRow = 3
             let endRow = max(5, snapshot.context.rows) - 2
             let listWidth = snapshot.context.cols / 2 - 1
             let previewStartCol = listWidth + 2
@@ -277,7 +277,7 @@ actor UIController {
 
     private func handleKey(key: Key) {
         let (rows, cols) = terminalSize
-        let availableRows = rows - 4  // input + border + status + spacing
+        let availableRows = rows - 3  // input + combined divider/status + spacing
         let visibleHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
         let context = InputContext(
@@ -560,8 +560,8 @@ actor UIController {
         let rows = max(5, rawSize.0)
         let cols = max(10, rawSize.1)
 
-        // Layout: input | border | status | items…  →  4 rows of chrome
-        let availableRows = rows - 4
+        // Layout: input | divider/status | items…  →  3 rows of chrome
+        let availableRows = rows - 3
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
         let context = RenderContext(

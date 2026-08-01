@@ -24,8 +24,8 @@ struct UIRenderer: Sendable {
         let (rows, cols) = (context.rows, context.cols)
 
         // Calculate available rows for items
-        // Layout: row 1 = input, row 2 = border, row 3 = status, rows 4..N = items.
-        let availableRows = rows - 4  // input, border, status, and one spare row
+        // Layout: row 1 = input, row 2 = divider and status, rows 3..N = items.
+        let availableRows = rows - 3  // input, combined chrome row, and one spare row
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
         // Calculate layout based on preview mode
@@ -52,11 +52,9 @@ struct UIRenderer: Sendable {
         // Render input line (positions itself) - use full width
         frame += renderInputLine(query: state.query, cursorPosition: state.cursorPosition, cols: cols)
 
-        // Render the divider directly below the query.
+        // Render the divider directly below the query, then overlay its stable
+        // status text so the line continues to the right of the count.
         frame += renderBorderLine(row: 2, cols: cols)
-
-        // Keep loaded-item and search-progress feedback in a stable status row
-        // above the result list.
         frame += renderStatusBar(
             matchedCount: state.matchCount,
             totalItems: state.totalItems,
@@ -65,7 +63,7 @@ struct UIRenderer: Sendable {
             searchProgress: context.searchProgress,
             scrollOffset: state.scrollOffset,
             displayHeight: displayHeight,
-            row: 3,
+            row: 2,
             cols: listWidth,
             spinnerFrame: context.spinnerFrame
         )
@@ -86,7 +84,7 @@ struct UIRenderer: Sendable {
                 matchedCount: state.matchCount,
                 scrollOffset: state.scrollOffset,
                 displayHeight: displayHeight,
-                row: 4,
+                row: 3,
                 col: listWidth
             )
         }
@@ -154,7 +152,7 @@ struct UIRenderer: Sendable {
     ) -> String {
         var buffer = ""
         for (displayIndex, matchedItem) in visibleItems.enumerated() {
-            let row = displayIndex + 4  // Below input, status, and border.
+            let row = displayIndex + 3  // Below the input and combined chrome row.
             let actualIndex = scrollOffset + displayIndex
 
             let isSelected = selectedIndex == actualIndex
@@ -225,7 +223,7 @@ struct UIRenderer: Sendable {
             row: row,
             width: cols
         )
-        return Self.statusBar.render(config: config)
+        return ANSIColors.moveCursor(row: row, col: 1) + Self.statusBar.content(config: config)
     }
 
     /// Render a compact viewport scrollbar beside the result rows. The thumb

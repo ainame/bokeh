@@ -62,6 +62,15 @@ public struct StatusBar: Sendable {
     /// - Parameter config: Status bar configuration
     /// - Returns: ANSI-formatted string for the status bar
     public func render(config: Config) -> String {
+        ANSIColors.moveCursor(row: config.row, col: 1) +
+            ANSIColors.clearLineToEnd +
+            TextRenderer.pad(content(config: config), width: config.width)
+    }
+
+    /// Return the unpositioned status text for composition into another widget.
+    /// This lets a caller overlay the status on a separator without clearing
+    /// the rest of that line.
+    public func content(config: Config) -> String {
         // Keep the count aligned across state changes: both the spinner and
         // ready tick occupy one terminal cell followed by one space.
         let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : "✓ "
@@ -82,9 +91,7 @@ public struct StatusBar: Sendable {
             }
             status += " [\(percent)%]"
         }
-        
-        return ANSIColors.moveCursor(row: config.row, col: 1) + 
-               ANSIColors.clearLineToEnd + 
-               TextRenderer.pad(prefix + status, width: config.width)
+
+        return prefix + status + " "
     }
 }

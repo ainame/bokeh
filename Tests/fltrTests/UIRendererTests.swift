@@ -78,7 +78,7 @@ func rendererShowsSearchProgress() {
     )
 
     #expect(frame.contains("[25%]"))
-    #expect(frame.contains("\u{001B}[3;1H"))
+    #expect(frame.contains("\u{001B}[2;1H"))
 }
 
 @Test("Renderer keeps a fixed ready indicator beside the count")
@@ -101,7 +101,7 @@ func rendererShowsReadyTick() {
     )
 
     #expect(frame.contains("✓ 0/0"))
-    #expect(frame.contains("\u{001B}[3;1H"))
+    #expect(frame.contains("\u{001B}[2;1H"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")
@@ -128,10 +128,10 @@ func rendererUsesViewportScrollbar() {
         context: context,
         buffer: TextBuffer()
     )
-    #expect(topFrame.contains("\u{001B}[4;40H█"))
+    #expect(topFrame.contains("\u{001B}[3;40H█"))
     #expect(!topFrame.contains("[0%]"))
 
-    state.scrollOffset = 46  // Halfway through the 92-row scroll range.
+    state.scrollOffset = 46  // Halfway through the 91-row scroll range.
     let middleFrame = renderer.assembleFrame(
         state: state,
         visibleItems: [],
@@ -141,7 +141,7 @@ func rendererUsesViewportScrollbar() {
     )
     #expect(middleFrame.contains("\u{001B}[7;40H█"))
 
-    state.scrollOffset = 92
+    state.scrollOffset = 91
     let bottomFrame = renderer.assembleFrame(
         state: state,
         visibleItems: [],
