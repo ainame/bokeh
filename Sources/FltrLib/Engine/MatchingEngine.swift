@@ -5,10 +5,14 @@ import Foundation
 struct MatchingEngine: Sendable {
     private let matcher: FuzzyMatcher
     private let parallelThreshold: Int  // Minimum items to use parallel matching
+    /// Leave one cooperative executor worker available for the input reducer,
+    /// terminal compositor, and frame scheduling while a search is active.
+    private let searchWorkerCount: Int
 
-    init(matcher: FuzzyMatcher, parallelThreshold: Int = 1000) {
+    init(matcher: FuzzyMatcher, parallelThreshold: Int = 1000, searchWorkerCount: Int? = nil) {
         self.matcher = matcher
         self.parallelThreshold = parallelThreshold
+        self.searchWorkerCount = searchWorkerCount ?? max(1, ProcessInfo.processInfo.activeProcessorCount - 1)
     }
 
     /// Match items in parallel using TaskGroup.
@@ -41,8 +45,7 @@ struct MatchingEngine: Sendable {
         }
 
         // Parallel matching for large datasets
-        let cpuCount = ProcessInfo.processInfo.activeProcessorCount
-        let partitionSize = max(100, items.count / cpuCount)
+        let partitionSize = max(100, items.count / searchWorkerCount)
 
         return await withTaskGroup(of: [MatchedItem].self) { group in
             var startIdx = 0
@@ -96,8 +99,7 @@ struct MatchingEngine: Sendable {
         // Prepare the pattern once for all candidates
         let prepared = matcher.prepare(pattern)
 
-        let cpuCount = ProcessInfo.processInfo.activeProcessorCount
-        let chunksPerPartition = max(1, totalChunks / cpuCount)
+        let chunksPerPartition = max(1, totalChunks / searchWorkerCount)
 
         return await withTaskGroup(of: [MatchedItem].self) { group in
             var startIdx = 0

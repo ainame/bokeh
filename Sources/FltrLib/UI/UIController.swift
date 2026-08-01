@@ -214,7 +214,7 @@ actor UIController {
                     currentMatchTask?.cancel()
 
                     // Re-match against the fresh item set in the background.
-                    fetchItemsTask = Task {
+                    fetchItemsTask = Task(priority: .utility) {
                         let query = self.state.query
                         let generation = self.matchGeneration
                         let chunkList = await self.cache.snapshotChunkList()
@@ -322,7 +322,7 @@ actor UIController {
         let merger = state.merger
         let generation = matchGeneration
         let cache = self.cache
-        currentMatchTask = Task.detached(priority: .userInitiated) {
+        currentMatchTask = Task.detached(priority: .utility) {
             let chunkList = await cache.snapshotChunkList()
             guard !Task.isCancelled else { return }
             await self.runMatch(
@@ -565,7 +565,7 @@ actor UIController {
         )
         let renderer = self.renderer
         let matcher = self.matcher
-        let frameTask = Task.detached(priority: .userInitiated) {
+        let frameTask = Task.detached(priority: .utility) {
             FrameBuilder.build(
                 snapshot: snapshot,
                 renderer: renderer,
