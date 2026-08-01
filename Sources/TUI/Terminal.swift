@@ -1,9 +1,9 @@
 public protocol Terminal: Actor {
-    func enterRawMode() throws
-    func exitRawMode()
+    func enterRawMode() async throws
+    func exitRawMode() async
     func getSize() throws -> (rows: Int, cols: Int)
-    func write(_ string: String)
-    func flush()
-    func readInputEvent() -> Key?
+    nonisolated func write(_ string: String)
+    nonisolated func flush()
+    func inputEvents() -> AsyncStream<Key>
     var ttyBroken: Bool { get }
 }

@@ -15,18 +15,21 @@ import Synchronization
 /// This actor is designed for safe concurrent access to terminal I/O operations.
 public actor RawTerminal: Terminal {
     private var originalTermios: termios?
-    private var ttyFd: FileDescriptor?
+    private var inputFd: FileDescriptor?
+    private var outputFd: FileDescriptor?
     private var isRawMode = false
-    private var inputDecoder = InputDecoder()
     private var inputPumpTask: Task<Void, Never>?
     private var inputGeneration: UInt = 0
+    private let inputChannel = TerminalInputChannel()
+    private let outputWriter = TerminalOutputWriter()
     public private(set) var ttyBroken = false  // set on fatal read error (EIO/EBADF)
 
     // Cleanup state that needs to be accessed from nonisolated context (protected by Mutex)
     private let cleanupState = Mutex<CleanupState?>(nil)
 
     private struct CleanupState: Sendable {
-        let fd: FileDescriptor
+        let inputFd: FileDescriptor
+        let outputFd: FileDescriptor
         let termios: termios
     }
 
@@ -62,21 +65,30 @@ public actor RawTerminal: Terminal {
     ///           `TerminalError.failedToSetAttributes` if raw mode cannot be activated
     ///
     /// - Note: Always call `exitRawMode()` to restore terminal state, preferably in a defer block
-    public func enterRawMode() throws {
+    public func enterRawMode() async throws {
         guard !isRawMode else { return }
 
         // Open /dev/tty for keyboard input (works even when stdin is piped)
-        let fd: FileDescriptor
+        let inputFd: FileDescriptor
         do {
-            fd = try FileDescriptor.open("/dev/tty", .readWrite)
+            inputFd = try FileDescriptor.open("/dev/tty", .readOnly)
         } catch {
             throw TerminalError.failedToOpenTTY
         }
-        ttyFd = fd
+        let outputFd: FileDescriptor
+        do {
+            outputFd = try FileDescriptor.open("/dev/tty", .writeOnly)
+        } catch {
+            try? inputFd.close()
+            throw TerminalError.failedToOpenTTY
+        }
+        self.inputFd = inputFd
+        self.outputFd = outputFd
 
         var raw = termios()
-        guard tcgetattr(fd.rawValue, &raw) == 0 else {
-            try? fd.close()
+        guard tcgetattr(inputFd.rawValue, &raw) == 0 else {
+            try? inputFd.close()
+            try? outputFd.close()
             throw TerminalError.failedToGetAttributes
         }
 
@@ -95,60 +107,63 @@ public actor RawTerminal: Terminal {
         fltr_termios_setVMIN(&raw, 0)   // VMIN = 0
         fltr_termios_setVTIME(&raw, 1)  // VTIME = 1 (100ms)
 
-        guard tcsetattr(fd.rawValue, TCSAFLUSH, &raw) == 0 else {
-            try? fd.close()
+        guard tcsetattr(inputFd.rawValue, TCSAFLUSH, &raw) == 0 else {
+            try? inputFd.close()
+            try? outputFd.close()
             throw TerminalError.failedToSetAttributes
         }
 
         // Save cleanup state for deinit safety net
-        cleanupState.withLock { $0 = CleanupState(fd: fd, termios: originalTermios!) }
+        cleanupState.withLock {
+            $0 = CleanupState(inputFd: inputFd, outputFd: outputFd, termios: originalTermios!)
+        }
 
-        // Enter alternate screen buffer
-        write("\u{001B}[?1049h")
-        // Hide cursor
-        write("\u{001B}[?25l")
-        // Enable mouse tracking (SGR mode with scroll events)
-        write("\u{001B}[?1000h")  // Enable mouse tracking
-        write("\u{001B}[?1006h")  // Enable SGR extended mouse mode
-        // Clear screen
-        write("\u{001B}[2J")
-        flush()
+        // Setup must complete before frames are accepted. Normal UI output is
+        // then owned by the separate writer actor.
+        _ = try? outputFd.writeAll("\u{001B}[?1049h\u{001B}[?25l\u{001B}[?1000h\u{001B}[?1006h\u{001B}[2J".utf8)
+        await outputWriter.start(fd: outputFd)
 
         isRawMode = true
         ttyBroken = false
         inputGeneration &+= 1
-        startInputPump(fd: fd, generation: inputGeneration)
+        startInputPump(fd: inputFd, generation: inputGeneration)
     }
 
     /// Exits raw mode and restores original terminal state.
     ///
     /// Restores the terminal to its original state before entering raw mode,
     /// exits the alternate screen buffer, and shows the cursor.
-    public func exitRawMode() {
+    public func exitRawMode() async {
         guard isRawMode else { return }
 
         inputGeneration &+= 1
         inputPumpTask?.cancel()
+        if let inputPumpTask {
+            // The reader uses VTIME=1, so cancellation becomes observable
+            // within 100 ms. Joining it avoids Darwin blocking `close` while
+            // another thread is still inside `read(2)` on this descriptor.
+            await inputPumpTask.value
+        }
         inputPumpTask = nil
 
-        // Disable mouse tracking
-        write("\u{001B}[?1006l")  // Disable SGR extended mouse mode
-        write("\u{001B}[?1000l")  // Disable mouse tracking
-        // Show cursor
-        write("\u{001B}[?25h")
-        // Exit alternate screen buffer
-        write("\u{001B}[?1049l")
-        flush()
+        // Serialise cleanup after all queued frames, so a stale frame cannot
+        // be written after leaving the alternate screen.
+        await outputWriter.stop(finalSequence: "\u{001B}[?1006l\u{001B}[?1000l\u{001B}[?25h\u{001B}[?1049l")
 
-        if let fd = ttyFd, var original = originalTermios {
-            // Use TCSADRAIN instead of TCSAFLUSH to wait for output to complete
-            // before changing settings. TCSAFLUSH would discard pending escape sequences.
-            tcsetattr(fd.rawValue, TCSADRAIN, &original)
-            try? fd.close()
+        if let inputFd, var original = originalTermios {
+            // The output writer has already been joined above. Do not use
+            // TCSADRAIN here: on a detached or heavily loaded PTY it can wait
+            // indefinitely even though no fltr write remains in flight.
+            tcsetattr(inputFd.rawValue, TCSANOW, &original)
+            // Input has a dedicated descriptor. Closing it wakes the blocking
+            // byte reader without waiting for the output writer.
+            try? inputFd.close()
         }
+        try? outputFd?.close()
 
         isRawMode = false
-        ttyFd = nil
+        self.inputFd = nil
+        self.outputFd = nil
 
         // Clear cleanup state since we've cleaned up properly
         cleanupState.withLock { $0 = nil }
@@ -166,13 +181,14 @@ public actor RawTerminal: Terminal {
 
         // Write cleanup sequences directly to fd
         let cleanupSequence = "\u{001B}[?1006l\u{001B}[?1000l\u{001B}[?25h\u{001B}[?1049l"
-        _ = try? state.fd.writeAll(cleanupSequence.utf8)
-        fsync(state.fd.rawValue)
+        _ = try? state.outputFd.writeAll(cleanupSequence.utf8)
+        fsync(state.outputFd.rawValue)
 
         // Restore terminal attributes
         var termios = state.termios
-        tcsetattr(state.fd.rawValue, TCSADRAIN, &termios)
-        try? state.fd.close()
+        tcsetattr(state.inputFd.rawValue, TCSANOW, &termios)
+        try? state.inputFd.close()
+        try? state.outputFd.close()
     }
 
     /// Gets the current terminal size.
@@ -181,8 +197,8 @@ public actor RawTerminal: Terminal {
     /// - Throws: `TerminalError.failedToGetSize` if size cannot be determined
     public func getSize() throws -> (rows: Int, cols: Int) {
         var w = winsize()
-        // Use tty fd if available (works when stdout is piped)
-        let fd = ttyFd?.rawValue ?? FileDescriptor.standardOutput.rawValue
+        // Use input tty fd if available (works when stdout is piped)
+        let fd = inputFd?.rawValue ?? FileDescriptor.standardOutput.rawValue
         let result = withUnsafeMutablePointer(to: &w) { ptr in
             fltr_ioctl_TIOCGWINSZ(fd, ptr)
         }
@@ -196,52 +212,50 @@ public actor RawTerminal: Terminal {
     /// Uses /dev/tty when available to avoid contaminating stdout (important for piping).
     ///
     /// - Parameter string: The string to write
-    public func write(_ string: String) {
-        if let fd = ttyFd {
-            _ = try? fd.writeAll(string.utf8)
-        } else {
-            _ = try? FileDescriptor.standardOutput.writeAll(string.utf8)
-        }
+    public nonisolated func write(_ string: String) {
+        let writer = outputWriter
+        Task { await writer.write(string) }
     }
 
     /// Flushes terminal output buffer.
-    public func flush() {
+    public nonisolated func flush() {
         // Terminal writes are displayed by the terminal emulator without a
         // filesystem flush. Avoid a synchronous fsync per interactive frame:
         // it serialises keyboard reads and can make rapid typing feel laggy.
     }
 
-    /// Returns the next input event already decoded by the input pump.
-    /// This actor method never performs a blocking terminal read, so output
-    /// writes cannot delay the UI controller from handling queued keystrokes.
-    public func readInputEvent() -> Key? {
-        inputDecoder.nextEvent()
+    /// A lossless stream of decoded input events. The dedicated byte reader
+    /// owns the decoder and publishes directly to this stream.
+    public func inputEvents() -> AsyncStream<Key> {
+        inputChannel.stream
     }
 
     /// The POSIX read has a VTIME timeout and can block the executing thread.
     /// Keep it in a dedicated detached task so RawTerminal can still service
     /// output and UIController can consume already-decoded events.
     private func startInputPump(fd: FileDescriptor, generation: UInt) {
-        inputPumpTask = Task.detached { [weak self] in
+        let inputChannel = inputChannel
+        inputPumpTask = Task.detached { [weak self, inputChannel] in
+            var decoder = InputDecoder()
             while !Task.isCancelled {
                 let read = Self.readRawByte(from: fd)
-                guard let self else { return }
-                await self.acceptInput(read, generation: generation)
-                if case .broken = read { return }
+                switch read {
+                case .byte(let byte): decoder.feed(byte)
+                case .timeout: decoder.handleTimeout()
+                case .broken:
+                    await self?.markTTYBroken(generation: generation)
+                    return
+                }
+                while let key = decoder.nextEvent() {
+                    inputChannel.yield(key)
+                }
             }
         }
     }
 
-    private func acceptInput(_ read: InputRead, generation: UInt) {
+    private func markTTYBroken(generation: UInt) {
         guard isRawMode, generation == inputGeneration else { return }
-        switch read {
-        case .byte(let byte):
-            inputDecoder.feed(byte)
-        case .timeout:
-            inputDecoder.handleTimeout()
-        case .broken:
-            ttyBroken = true
-        }
+        ttyBroken = true
     }
 
     nonisolated private static func readRawByte(from fd: FileDescriptor) -> InputRead {
@@ -277,5 +291,65 @@ public actor RawTerminal: Terminal {
     /// Clears the current line.
     public func clearLine() {
         write("\u{001B}[2K")
+    }
+}
+
+/// Thread-safe bridge from detached byte reading to the UI reducer.
+private final class TerminalInputChannel: @unchecked Sendable {
+    let stream: AsyncStream<Key>
+    private let continuation: AsyncStream<Key>.Continuation
+
+    init() {
+        var captured: AsyncStream<Key>.Continuation!
+        stream = AsyncStream { captured = $0 }
+        continuation = captured
+    }
+
+    func yield(_ key: Key) { continuation.yield(key) }
+}
+
+/// Owns blocking interactive writes independently from input and state. The
+/// one-slot mailbox makes output latest-wins: when the terminal is slow, a
+/// burst of prompt/frame updates cannot become a backlog that is rendered
+/// long after the user has moved on.
+private actor TerminalOutputWriter {
+    private var fd: FileDescriptor?
+    private var acceptingFrames = false
+    private var continuation: AsyncStream<String>.Continuation?
+    private var writerTask: Task<Void, Never>?
+
+    func start(fd: FileDescriptor) {
+        self.fd = fd
+        acceptingFrames = true
+        var captured: AsyncStream<String>.Continuation!
+        let stream = AsyncStream<String>(bufferingPolicy: .bufferingNewest(1)) {
+            captured = $0
+        }
+        continuation = captured
+        writerTask = Task.detached {
+            for await frame in stream {
+                guard !Task.isCancelled else { return }
+                _ = try? fd.writeAll(frame.utf8)
+            }
+        }
+    }
+
+    func write(_ string: String) {
+        guard acceptingFrames else { return }
+        continuation?.yield(string)
+    }
+
+    func stop(finalSequence: String) async {
+        guard let fd else { return }
+        acceptingFrames = false
+        writerTask?.cancel()
+        continuation?.finish()
+        if let writerTask {
+            await writerTask.value
+        }
+        writerTask = nil
+        continuation = nil
+        _ = try? fd.writeAll(finalSequence.utf8)
+        self.fd = nil
     }
 }

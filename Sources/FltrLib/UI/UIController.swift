@@ -114,6 +114,7 @@ actor UIController {
     private var matchGeneration: UInt = 0
     private var currentFrameTask: Task<RenderedFrame?, Never>?
     private var pendingResultRenderTask: Task<Void, Never>?
+    private var inputTask: Task<Void, Never>?
     private var renderGeneration: UInt = 0
 
     private var renderScheduled = false
@@ -164,6 +165,17 @@ actor UIController {
         refreshPreview()
         await render(generation: renderGeneration)
 
+        // Input is a continuous producer, not something the UI loop polls.
+        // This task is the reducer's only input path; terminal output and
+        // matching work cannot hold it up.
+        let inputEvents = await terminal.inputEvents()
+        inputTask = Task { [weak self] in
+            for await key in inputEvents {
+                guard !Task.isCancelled else { return }
+                await self?.handleKey(key: key)
+            }
+        }
+
         var lastRefresh = Date()
         let refreshIntervalFast: TimeInterval = 0.02
         let refreshIntervalSlow: TimeInterval = 0.1
@@ -185,52 +197,44 @@ actor UIController {
                 scheduleRender()
             }
 
-            if let key = await terminal.readInputEvent() {
-                await handleKey(key: key)
-            } else {
-                let currentCount = await cache.count()
+            let currentCount = await cache.count()
 
-                if currentCount > lastItemCount {
-                    let now = Date()
-                    // Keep perceived latency low for small/medium streams while
-                    // retaining conservative throttling for very large feeds.
-                    let refreshInterval = currentCount < 10_000 ? refreshIntervalFast : refreshIntervalSlow
-                    if now.timeIntervalSince(lastRefresh) >= refreshInterval {
-                        lastItemCount = currentCount
-                        state.totalItems = currentCount
+            if currentCount > lastItemCount {
+                let now = Date()
+                // Keep perceived latency low for small/medium streams while
+                // retaining conservative throttling for very large feeds.
+                let refreshInterval = currentCount < 10_000 ? refreshIntervalFast : refreshIntervalSlow
+                if now.timeIntervalSince(lastRefresh) >= refreshInterval {
+                    lastItemCount = currentCount
+                    state.totalItems = currentCount
 
-                        fetchItemsTask?.cancel()
-                        currentMatchTask?.cancel()
+                    fetchItemsTask?.cancel()
+                    currentMatchTask?.cancel()
 
-                        // Re-match against the fresh item set in the background.
-                        // Always a full search: previousQuery is owned by the
-                        // debounce task; writing it here would let the debounce
-                        // path see a stale value and permanently cap its results.
-                        fetchItemsTask = Task {
-                            let query = self.state.query
-                            let generation = self.matchGeneration
-                            let chunkList = await self.cache.snapshotChunkList()
+                    // Re-match against the fresh item set in the background.
+                    fetchItemsTask = Task {
+                        let query = self.state.query
+                        let generation = self.matchGeneration
+                        let chunkList = await self.cache.snapshotChunkList()
 
-                            self.invalidateMergerCache()
-                            self.chunkCache.clear()
+                        self.invalidateMergerCache()
+                        self.chunkCache.clear()
 
-                            await self.runMatch(
-                                query: query,
-                                generation: generation,
-                                previousQuery: "",  // force full search
-                                merger: .empty,
-                                chunkList: chunkList
-                            )
-                        }
-
-                        lastRefresh = now
+                        await self.runMatch(
+                            query: query,
+                            generation: generation,
+                            previousQuery: "",  // force full search
+                            merger: .empty,
+                            chunkList: chunkList
+                        )
                     }
-                }
 
-                // The input pump is independent of this loop. Yield briefly so
-                // streaming maintenance does not busy-spin while it is idle.
-                try? await Task.sleep(for: .milliseconds(5))
+                    lastRefresh = now
+                }
             }
+
+            // Stdin maintenance has its own cadence. It never gates input.
+            try? await Task.sleep(for: .milliseconds(5))
         }
 
         // Freeze state and suppress any in-flight renders before we tear down
@@ -245,6 +249,7 @@ actor UIController {
         fetchItemsTask?.cancel()
         currentFrameTask?.cancel()
         pendingResultRenderTask?.cancel()
+        inputTask?.cancel()
         await terminal.exitRawMode()
 
         return state.getSelectedItems()
@@ -404,7 +409,7 @@ actor UIController {
             cursorPosition: state.cursorPosition,
             cols: max(10, cols)
         )
-        await terminal.write(prompt)
+        terminal.write(prompt)
     }
 
     // MARK: - Matching
@@ -568,7 +573,7 @@ actor UIController {
         else { return }
 
         preview.bounds = frame.previewBounds
-        await terminal.write(frame.buffer)
-        await terminal.flush()
+        terminal.write(frame.buffer)
+        terminal.flush()
     }
 }

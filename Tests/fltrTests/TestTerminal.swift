@@ -1,21 +1,26 @@
 import TUI
+import Synchronization
 
 actor TestTerminal: Terminal {
-    private var inputQueue: [UInt8] = []
     private var decoder = InputDecoder()
-    private(set) var output: String = ""
+    private let outputStorage = Mutex<String>("")
     private(set) var enteredRawMode = false
     private var size: (rows: Int, cols: Int)
+    private let stream: AsyncStream<Key>
+    private let continuation: AsyncStream<Key>.Continuation
 
     init(rows: Int = 24, cols: Int = 80) {
         self.size = (rows, cols)
+        var captured: AsyncStream<Key>.Continuation!
+        self.stream = AsyncStream { captured = $0 }
+        self.continuation = captured
     }
 
-    func enterRawMode() {
+    func enterRawMode() async {
         enteredRawMode = true
     }
 
-    func exitRawMode() {
+    func exitRawMode() async {
         enteredRawMode = false
     }
 
@@ -23,25 +28,31 @@ actor TestTerminal: Terminal {
         size
     }
 
-    func write(_ string: String) {
-        output += string
+    nonisolated func write(_ string: String) {
+        outputStorage.withLock { $0 += string }
     }
 
-    func flush() {}
+    nonisolated func flush() {}
+
+    var output: String { outputStorage.withLock { $0 } }
 
     var ttyBroken: Bool { false }
 
-    func readInputEvent() -> Key? {
-        if !inputQueue.isEmpty {
-            decoder.feed(inputQueue.removeFirst())
-        } else {
-            decoder.handleTimeout()
-        }
-        return decoder.nextEvent()
+    func inputEvents() -> AsyncStream<Key> {
+        stream
     }
 
     func enqueue(bytes: [UInt8]) {
-        inputQueue.append(contentsOf: bytes)
+        for byte in bytes {
+            decoder.feed(byte)
+            while let key = decoder.nextEvent() {
+                continuation.yield(key)
+            }
+        }
+        decoder.handleTimeout()
+        while let key = decoder.nextEvent() {
+            continuation.yield(key)
+        }
     }
 
     func setSize(rows: Int, cols: Int) {
@@ -49,6 +60,6 @@ actor TestTerminal: Terminal {
     }
 
     func clearOutput() {
-        output.removeAll(keepingCapacity: true)
+        outputStorage.withLock { $0.removeAll(keepingCapacity: true) }
     }
 }
