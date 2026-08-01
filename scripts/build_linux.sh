@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ARCH="${ARCH:-aarch64}"
-SWIFT_SDK_NAME="swift-6.3.3-RELEASE_static-linux-0.1.0"
+SWIFT_SDK_NAME="${SWIFT_SDK_NAME:-swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a_static-linux-0.1.0}"
 
 if command -v swiftly >/dev/null 2>&1 && [[ -f .swift-version ]]; then
   SWIFT=(swiftly run swift)
@@ -25,5 +25,5 @@ fi
 # The Swift Static Linux SDK's libc.a includes mimalloc. Linking a second copy
 # causes duplicate allocator symbols, so use the SDK-provided static allocator.
 
-"${SWIFT[@]}" build -c release --product fltr --swift-sdk "${ARCH}-swift-linux-musl" \
+"${SWIFT[@]}" build -c release --product fltr --swift-sdk "${SWIFT_SDK_NAME}" --triple "${ARCH}-swift-linux-musl" \
   -Xlinker -z -Xlinker stack-size=0x80000

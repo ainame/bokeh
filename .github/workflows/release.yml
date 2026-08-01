@@ -34,8 +34,14 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Show Swift version
-        run: swift --version
+      - name: Setup Swift
+        run: |
+          curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
+          swiftly install "$(<.swift-version)"
+          swiftly run swift --version
+          dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
 
       - name: Build release binary
         run: swift build -c release --product fltr
@@ -54,21 +60,20 @@ jobs:
 
   generate-sboms:
     name: Generate SBOMs
-    runs-on: ubuntu-22.04
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Install Swift 6.4 snapshot
+      - name: Setup Swift
         run: |
-          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
-          tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
-          ./swiftly init --quiet-shell-followup
-          . "${SWIFTLY_HOME_DIR:-${HOME}/.local/share/swiftly}/env.sh"
-          swiftly install 6.4.x-snapshot
-          swiftly use 6.4.x-snapshot
-          swift --version
+          curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
+          swiftly install "$(<.swift-version)"
+          swiftly run swift --version
+          dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
 
       - name: Generate release SBOMs
         run: scripts/generate_sboms.sh dist
@@ -82,31 +87,33 @@ jobs:
 
   build-linux:
     name: Build static Linux (${{ matrix.arch }})
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - runner: macos-26
+            arch: aarch64
+          - runner: macos-26-intel
+            arch: x86_64
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Install Swift 6.3.3
+      - name: Setup Swift
         run: |
-          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
-          tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
-          ./swiftly init --quiet-shell-followup
-          . "${SWIFTLY_HOME_DIR:-${HOME}/.local/share/swiftly}/env.sh"
-          swiftly install 6.3.3
+          curl -fsSLO https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          . "${SWIFTLY_HOME_DIR:-${HOME}/.swiftly}/env.sh"
+          swiftly install "$(<.swift-version)"
           swiftly run swift --version
           dirname "$(command -v swiftly)" >> "${GITHUB_PATH}"
 
       - name: Install Swift Static Linux SDK
         run: |
           swiftly run swift sdk install \
-            https://download.swift.org/swift-6.3.3-release/static-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
-            --checksum 87c3eaf908e67c0e13a84367119e12273cec1d2cd3d81f7d74bb36722d6b607b
+            https://download.swift.org/swift-6.4.x-branch/static-sdk/swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a/swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a_static-linux-0.1.0.artifactbundle.tar.gz
 
       - name: Build static release binary with mimalloc
         run: ARCH=${{ matrix.arch }} make linux
