@@ -31,8 +31,7 @@ struct FuzzyMatchBackend: Sendable {
 
     func matchRank(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, scratch: MatcherScratch) -> RankMatch? {
         let query = preparedQuery(for: prepared, scratch: scratch)
-        let text = String(decoding: textBuf, as: UTF8.self)
-        guard let scored = matcher.score(text, against: query, buffer: &scratch.fuzzyBuffer) else {
+        guard let scored = matcher.score(utf8: textBuf, against: query, buffer: &scratch.fuzzyBuffer) else {
             return nil
         }
 
@@ -46,8 +45,7 @@ struct FuzzyMatchBackend: Sendable {
 
     func matchHighlight(prepared: PreparedPattern, textBuf: UnsafeBufferPointer<UInt8>, scratch: MatcherScratch) -> MatchResult? {
         let query = preparedQuery(for: prepared, scratch: scratch)
-        let text = String(decoding: textBuf, as: UTF8.self)
-        guard let scored = matcher.score(text, against: query, buffer: &scratch.fuzzyBuffer) else {
+        guard let scored = matcher.score(utf8: textBuf, against: query, buffer: &scratch.fuzzyBuffer) else {
             return nil
         }
 
