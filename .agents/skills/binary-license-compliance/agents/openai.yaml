@@ -1,0 +1,4 @@
+interface:
+  display_name: "Binary License Compliance"
+  short_description: "Audit binary release licenses and notices"
+  default_prompt: "Use $binary-license-compliance to audit this release archive and add compliant license notices."
