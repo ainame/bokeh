@@ -77,7 +77,7 @@ func rendererShowsSearchProgress() {
         buffer: TextBuffer()
     )
 
-    #expect(frame.contains("[25%]"))
+    #expect(frame.contains("[ 25%]"))
     #expect(frame.contains("\u{001B}[2;1H"))
 }
 
@@ -100,8 +100,34 @@ func rendererShowsReadyTick() {
         buffer: TextBuffer()
     )
 
-    #expect(frame.contains("✓ 0/0"))
+    #expect(frame.contains("✓ 0 / 0"))
     #expect(frame.contains("\u{001B}[2;1H"))
+}
+
+@Test("Renderer right-aligns match count to the loaded count")
+func rendererRightAlignsMatchCount() {
+    var state = UIState()
+    state.matchCount = 12
+    state.totalItems = 123_456
+
+    let renderer = UIRenderer(maxHeight: nil, multiSelect: false)
+    let frame = renderer.assembleFrame(
+        state: state,
+        visibleItems: [],
+        highlightPositions: [:],
+        context: RenderContext(
+            rows: 12,
+            cols: 80,
+            isReadingStdin: false,
+            searchProgress: nil,
+            showSplitPreview: false,
+            showFloatingPreview: false,
+            spinnerFrame: 0
+        ),
+        buffer: TextBuffer()
+    )
+
+    #expect(frame.contains("✓     12 / 123456"))
 }
 
 @Test("Renderer uses a viewport scrollbar instead of a percentage")

@@ -75,11 +75,15 @@ public struct StatusBar: Sendable {
         // ready tick occupy one terminal cell followed by one space.
         let prefix = config.isLoading ? spinner.frame(at: config.spinnerFrame) + " " : "✓ "
         
+        let totalText = String(config.totalCount)
+        let matchedText = String(config.matchedCount)
+        let matchedPadding = String(repeating: " ", count: max(0, totalText.count - matchedText.count))
+
         var status: String
         if config.selectedCount == 0 {
-            status = "\(config.matchedCount)/\(config.totalCount)"
+            status = "\(matchedPadding)\(matchedText) / \(totalText)"
         } else {
-            status = "\(config.matchedCount)/\(config.totalCount) (\(config.selectedCount) selected)"
+            status = "\(matchedPadding)\(matchedText) / \(totalText) (\(config.selectedCount) selected)"
         }
 
         if let completed = config.searchProgressCompleted {
@@ -89,7 +93,7 @@ public struct StatusBar: Sendable {
             } else {
                 percent = 0
             }
-            status += " [\(percent)%]"
+            status += String(format: " [%3d%%]", percent)
         }
 
         return prefix + status + " "
