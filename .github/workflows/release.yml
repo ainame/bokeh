@@ -31,6 +31,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Show Swift version
         run: swift --version
@@ -48,6 +50,34 @@ jobs:
         with:
           name: fltr-macos-${{ matrix.arch }}
           path: fltr-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  generate-sboms:
+    name: Generate SBOMs
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Swift 6.4 snapshot
+        run: |
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
+          tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
+          ./swiftly init --quiet-shell-followup
+          . "${SWIFTLY_HOME_DIR:-${HOME}/.local/share/swiftly}/env.sh"
+          swiftly install 6.4.x-snapshot
+          swiftly use 6.4.x-snapshot
+          swift --version
+
+      - name: Generate release SBOMs
+        run: scripts/generate_sboms.sh dist
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: fltr-sboms
+          path: dist/fltr-sbom-*.json
           if-no-files-found: error
 
   build-linux:
@@ -102,7 +132,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: [build-macos, build-linux]
+    needs: [build-macos, build-linux, generate-sboms]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
