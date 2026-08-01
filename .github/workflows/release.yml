@@ -91,6 +91,8 @@ jobs:
   build-linux:
     name: Build static Linux
     runs-on: macos-26
+    env:
+      SWIFT_SDK_NAME: swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-23-a_static-linux-0.1.0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -128,11 +130,17 @@ jobs:
             tar -C dist -czf "dist/fltr-linux-${arch}.tar.gz" "fltr-linux-${arch}"
           done
 
+          sdk_sbom="$(find "${HOME}/Library/org.swift.swiftpm/swift-sdks" -path "*/${SWIFT_SDK_NAME}.artifactbundle/sbom.spdx.json" -type f -print -quit)"
+          test -n "${sdk_sbom}"
+          cp "${sdk_sbom}" dist/fltr-sbom-static-linux-sdk.spdx.json
+
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
           name: fltr-linux
-          path: dist/fltr-linux-*.tar.gz
+          path: |
+            dist/fltr-linux-*.tar.gz
+            dist/fltr-sbom-static-linux-sdk.spdx.json
           if-no-files-found: error
 
   publish:

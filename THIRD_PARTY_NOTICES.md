@@ -14,6 +14,8 @@ Their license text is in `LICENSES/Apache-2.0.txt`.
 - swift-collections 1.6.0 — <https://github.com/apple/swift-collections>
 - swift-subprocess 1.0.0-beta.1 — <https://github.com/swiftlang/swift-subprocess>
 - swift-system 1.7.5 — <https://github.com/apple/swift-system>
+- Swift 6.4 runtime libraries in the static Linux binary — Apache-2.0 with
+  the Runtime Library Exception in `LICENSES/Swift-Runtime-Exception.txt`
 
 None of the resolved package distributions above includes a `NOTICE` file.
 
@@ -21,7 +23,9 @@ None of the resolved package distributions above includes a `NOTICE` file.
 
 - swift-displaywidth 0.1.0 — `LICENSES/swift-displaywidth-MIT.txt`
 - mimalloc, included by the Swift Static Linux SDK — `LICENSES/mimalloc-MIT.txt`
+- musl 1.2.5, linked into the static Linux binary — `LICENSES/musl-COPYRIGHT.txt`
 
-The static Linux release additionally includes code supplied by the Swift Static
-Linux SDK. Its complete third-party attribution inventory remains subject to a
-separate SDK-level audit; it is not represented by the SwiftPM SBOM.
+The GitHub Release also includes the Swift Static Linux SDK's SPDX inventory as
+`fltr-sbom-static-linux-sdk.spdx.json`. The static binary audit found that the
+two release architectures link musl and mimalloc, but not the SDK's curl,
+BoringSSL, libarchive, libxml2, or compression libraries.
