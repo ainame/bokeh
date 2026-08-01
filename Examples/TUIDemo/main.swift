@@ -74,8 +74,8 @@ actor WidgetGallery {
         
         // Main event loop
         while true {
-            guard let byte = await terminal.readByte() else {
-                // readByte() returns nil when no input available (VTIME timeout)
+            guard let key = await terminal.readInputEvent() else {
+                // readInputEvent() returns nil when no complete event is available.
                 // Only exit if the terminal is broken (closed/disconnected)
                 if await terminal.ttyBroken {
                     break
@@ -83,8 +83,6 @@ actor WidgetGallery {
                 // Otherwise continue polling
                 continue
             }
-            
-            let key = await parseKey(byte: byte, terminal: terminal)
 
             // Handle key event
             let shouldExit = handleKey(key)
@@ -101,34 +99,7 @@ actor WidgetGallery {
     private func advanceSpinner() {
         spinnerFrame += 1
     }
-    
-    private func parseKey(byte: UInt8, terminal: any Terminal) async -> Key {
-        // ESC sequence
-        if byte == 27 {
-            guard let next = await terminal.readByte() else {
-                return .escape
-            }
-            
-            if next == 91 { // '['
-                guard let cmd = await terminal.readByte() else {
-                    return .escape
-                }
-                
-                switch cmd {
-                case 65: return .up
-                case 66: return .down
-                case 67: return .right
-                case 68: return .left
-                default: return .unknown
-                }
-            }
-            
-            return .escape
-        }
-        
-        return KeyboardInput.parseKey(firstByte: byte, readNext: { nil })
-    }
-    
+
     private func handleKey(_ key: Key) -> Bool {
         switch key {
         case .escape, .ctrlC, .char("q"):

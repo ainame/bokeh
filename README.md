@@ -188,7 +188,7 @@ swift test
 
 **Architecture:**
 
-Built with Swift 6.2 using:
+Built with Swift 6.3 using:
 - Actors for safe concurrency
 - Parallel matching across CPU cores
 - [FuzzyMatch](https://github.com/ordo-one/FuzzyMatch) Smith-Waterman scoring

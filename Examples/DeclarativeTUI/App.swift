@@ -25,15 +25,15 @@ public struct App {
         
         // Main event loop - wait for exit key
         while true {
-            guard let byte = await terminal.readByte() else {
+            guard let key = await terminal.readInputEvent() else {
                 if await terminal.ttyBroken {
                     break
                 }
                 continue
             }
-            
+
             // Exit on ESC, Ctrl-C, or 'q'
-            if byte == 27 || byte == 3 || byte == 113 {
+            if key == .escape || key == .ctrlC || key == .char("q") {
                 break
             }
         }

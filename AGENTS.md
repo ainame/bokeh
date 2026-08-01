@@ -19,7 +19,7 @@ This file contains durable repository guidance. Keep task-specific requirements 
 
 ## Repository Rules
 
-- Use the Swift version selected by `.swift-version`; the package manifest currently uses Swift tools 6.2 and strict Swift 6 concurrency.
+- Use the Swift version selected by `.swift-version`; the package manifests use Swift tools 6.3 and strict Swift 6 concurrency.
 - Check `swift --version` before validation. If the active compiler does not match `.swift-version` and Swiftly is installed, run Swift commands through `swiftly run swift ...`.
 - Support macOS 26+ and Linux. Keep POSIX and terminal code portable across Darwin, glibc, and musl where applicable.
 - Make a focused git commit for each meaningful change.

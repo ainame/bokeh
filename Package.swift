@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.3
 import PackageDescription
 
 let package = Package(
@@ -15,13 +15,13 @@ let package = Package(
         .trait(name: "MmapBuffer", description: "Use mmap-based TextBuffer for reduced RSS on macOS"),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
-        .package(url: "https://github.com/apple/swift-system", from: "1.4.0"),
-        .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-collections", from: "1.1.0"),
-        .package(url: "https://github.com/ainame/swift-displaywidth", branch: "main"),
-        .package(url: "https://github.com/swiftlang/swift-subprocess", from: "0.3.0"),
-        .package(url: "https://github.com/ordo-one/FuzzyMatch.git", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.8.2"),
+        .package(url: "https://github.com/apple/swift-system", from: "1.7.5"),
+        .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.1.5"),
+        .package(url: "https://github.com/apple/swift-collections", from: "1.6.0"),
+        .package(url: "https://github.com/ainame/swift-displaywidth", from: "0.1.0"),
+        .package(url: "https://github.com/swiftlang/swift-subprocess", exact: "1.0.0-beta.1"),
+        .package(url: "https://github.com/ordo-one/FuzzyMatch.git", from: "1.4.0"),
     ],
     targets: [
         // fltr - Fuzzy finder executable
