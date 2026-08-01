@@ -53,15 +53,15 @@ jobs:
   build-linux:
     name: Build static Linux (x86_64)
     runs-on: ubuntu-22.04
+    env:
+      SWIFTLY_HOME_DIR: ${{ runner.temp }}/swiftly
+      SWIFTLY_BIN_DIR: ${{ runner.temp }}/swiftly-bin
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Swift 6.3.3
-        env:
-          SWIFTLY_HOME_DIR: ${{ runner.temp }}/swiftly
-          SWIFTLY_BIN_DIR: ${{ runner.temp }}/swiftly-bin
         run: |
           curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
           tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
