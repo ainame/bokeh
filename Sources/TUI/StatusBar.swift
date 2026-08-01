@@ -5,7 +5,6 @@ import Foundation
 /// Provides a configurable status bar that can show:
 /// - Match counts (e.g., "100/1000")
 /// - Selection counts (e.g., "5 selected")
-/// - Scroll progress indicator
 /// - Loading spinner animation
 public struct StatusBar: Sendable {
     /// Configuration for status bar rendering
@@ -65,13 +64,6 @@ public struct StatusBar: Sendable {
             status = "\(config.matchedCount)/\(config.totalCount)"
         } else {
             status = "\(config.matchedCount)/\(config.totalCount) (\(config.selectedCount) selected)"
-        }
-        
-        // Add scroll indicator if there are more items than visible
-        if config.matchedCount > config.displayHeight {
-            let maxScroll = max(1, config.matchedCount - config.displayHeight)
-            let scrollPercent = Int((Double(config.scrollOffset) / Double(maxScroll)) * 100)
-            status += " [\(scrollPercent)%]"
         }
         
         return ANSIColors.moveCursor(row: config.row, col: 1) + 

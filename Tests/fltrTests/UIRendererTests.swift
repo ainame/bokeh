@@ -53,3 +53,61 @@ func rendererCursorAnchorWideChars() {
     #expect(frame.hasSuffix("\u{001B}[1;5H"))
 }
 
+@Test("Renderer uses a viewport scrollbar instead of a percentage")
+func rendererUsesViewportScrollbar() {
+    var state = UIState()
+    state.matchCount = 100
+    state.totalItems = 100
+
+    let renderer = UIRenderer(maxHeight: nil, multiSelect: false)
+    let context = RenderContext(
+        rows: 12,
+        cols: 40,
+        isReadingStdin: false,
+        showSplitPreview: false,
+        showFloatingPreview: false,
+        spinnerFrame: 0
+    )
+
+    let topFrame = renderer.assembleFrame(
+        state: state,
+        visibleItems: [],
+        highlightPositions: [:],
+        context: context,
+        buffer: TextBuffer()
+    )
+    #expect(topFrame.contains("\u{001B}[3;40H█"))
+    #expect(!topFrame.contains("[0%]"))
+
+    state.scrollOffset = 46  // Halfway through the 92-row scroll range.
+    let middleFrame = renderer.assembleFrame(
+        state: state,
+        visibleItems: [],
+        highlightPositions: [:],
+        context: context,
+        buffer: TextBuffer()
+    )
+    #expect(middleFrame.contains("\u{001B}[6;40H█"))
+
+    state.scrollOffset = 92
+    let bottomFrame = renderer.assembleFrame(
+        state: state,
+        visibleItems: [],
+        highlightPositions: [:],
+        context: context,
+        buffer: TextBuffer()
+    )
+    #expect(bottomFrame.contains("\u{001B}[10;40H█"))
+
+    state.matchCount = 8  // Fits exactly in the eight-row viewport.
+    state.scrollOffset = 0
+    let shortListFrame = renderer.assembleFrame(
+        state: state,
+        visibleItems: [],
+        highlightPositions: [:],
+        context: context,
+        buffer: TextBuffer()
+    )
+    #expect(!shortListFrame.contains("│"))
+    #expect(!shortListFrame.contains("█"))
+}

@@ -39,6 +39,10 @@ struct UIRenderer: Sendable {
             listWidth = cols
         }
 
+        let showsScrollBar = state.matchCount > displayHeight
+        // Reserve one cell so the scrollbar never overwrites an item character.
+        let itemListWidth = showsScrollBar ? max(1, listWidth - 1) : listWidth
+
         // Build entire frame in a single string to minimize actor calls
         var frame = ""
 
@@ -58,9 +62,19 @@ struct UIRenderer: Sendable {
             selectedIndex: state.selectedIndex,
             selectedItems: state.selectedItems,
             scrollOffset: state.scrollOffset,
-            cols: listWidth,
+            cols: itemListWidth,
             textBuffer: buffer
         )
+
+        if showsScrollBar {
+            frame += renderScrollBar(
+                matchedCount: state.matchCount,
+                scrollOffset: state.scrollOffset,
+                displayHeight: displayHeight,
+                row: 3,
+                col: listWidth
+            )
+        }
 
         // Render status bar (positions itself)
         frame += renderStatusBar(
@@ -207,6 +221,36 @@ struct UIRenderer: Sendable {
             width: cols
         )
         return Self.statusBar.render(config: config)
+    }
+
+    /// Render a compact viewport scrollbar beside the result rows. The thumb
+    /// represents the visible window within the complete result set.
+    private func renderScrollBar(
+        matchedCount: Int,
+        scrollOffset: Int,
+        displayHeight: Int,
+        row: Int,
+        col: Int
+    ) -> String {
+        guard displayHeight > 0, matchedCount > displayHeight else { return "" }
+
+        let maxScroll = matchedCount - displayHeight
+        // Keep at least one track cell visible so a nearly full viewport still
+        // communicates that additional rows exist.
+        let thumbHeight = min(
+            displayHeight - 1,
+            max(1, (displayHeight * displayHeight + matchedCount - 1) / matchedCount)
+        )
+        let maxThumbStart = displayHeight - thumbHeight
+        let clampedOffset = min(max(0, scrollOffset), maxScroll)
+        let thumbStart = maxScroll == 0 ? 0 : (clampedOffset * maxThumbStart) / maxScroll
+
+        var buffer = ""
+        for index in 0..<displayHeight {
+            let glyph = index >= thumbStart && index < thumbStart + thumbHeight ? "█" : "│"
+            buffer += ANSIColors.moveCursor(row: row + index, col: col) + glyph
+        }
+        return buffer
     }
 
     private func inputCursorAnchor(query: String, cursorPosition: Int, cols: Int) -> String {
