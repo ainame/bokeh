@@ -523,6 +523,7 @@ actor UIController {
         // Materialise the visible window here; assembleFrame receives state
         // by value and cannot call mutating Merger methods itself.
         let visibleItems = state.merger.slice(state.scrollOffset, state.scrollOffset + displayHeight)
+        let textBuffer = self.textBuffer
         let selectedItemName = preview.showFloating
             ? state.merger.get(state.selectedIndex).map { $0.item.text(in: textBuffer) } ?? ""
             : ""
@@ -537,7 +538,6 @@ actor UIController {
         )
         let renderer = self.renderer
         let matcher = self.matcher
-        let textBuffer = self.textBuffer
         let frameTask = Task.detached(priority: .userInitiated) {
             FrameBuilder.build(
                 snapshot: snapshot,
