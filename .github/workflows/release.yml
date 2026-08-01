@@ -53,9 +53,6 @@ jobs:
   build-linux:
     name: Build static Linux (x86_64)
     runs-on: ubuntu-22.04
-    env:
-      SWIFTLY_HOME_DIR: ${{ runner.temp }}/swiftly
-      SWIFTLY_BIN_DIR: ${{ runner.temp }}/swiftly-bin
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,9 +63,10 @@ jobs:
           curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.1.2-$(uname -m).tar.gz
           tar -zxf swiftly-1.1.2-$(uname -m).tar.gz
           ./swiftly init --quiet-shell-followup
-          "${SWIFTLY_BIN_DIR}/swiftly" install 6.3.3
-          "${SWIFTLY_BIN_DIR}/swiftly" run swift --version
-          echo "${SWIFTLY_BIN_DIR}" >> "${GITHUB_PATH}"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          swiftly install 6.3.3
+          swiftly run swift --version
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
       - name: Install Swift Static Linux SDK
         run: |
