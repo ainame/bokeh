@@ -12,6 +12,94 @@ struct QueryUpdate: Sendable {
     let generation: UInt
 }
 
+/// Immutable actor snapshot consumed by the detached frame builder.  The
+/// `TextBuffer` reference is safe to read concurrently: it holds its read lock
+/// for each text extraction (documented on `TextBuffer`).
+private struct RenderSnapshot: Sendable {
+    let state: UIState
+    let visibleItems: [MatchedItem]
+    let context: RenderContext
+    let previewManager: PreviewManager?
+    let previewContent: String
+    let previewScrollOffset: Int
+    let selectedItemName: String
+}
+
+private struct RenderedFrame: Sendable {
+    let buffer: String
+    let previewBounds: Bounds?
+}
+
+/// Pure, per-frame work deliberately kept off `UIController` so typing can
+/// continue while visible-row highlighting and string assembly are in flight.
+private enum FrameBuilder {
+    static func build(
+        snapshot: RenderSnapshot,
+        renderer: UIRenderer,
+        matcher: FuzzyMatcher,
+        textBuffer: TextBuffer
+    ) -> RenderedFrame? {
+        var highlightResolver = HighlightResolver(matcher: matcher)
+        var highlightPositions: [Item.Index: [UInt16]] = [:]
+        highlightPositions.reserveCapacity(snapshot.visibleItems.count)
+        let query = QueryNormalizer.normalizeForMatching(snapshot.state.query)
+
+        for (index, matchedItem) in snapshot.visibleItems.enumerated() {
+            guard !Task.isCancelled else { return nil }
+            highlightPositions[matchedItem.item.index] = highlightResolver.positions(
+                query: query,
+                item: matchedItem.item,
+                textBuffer: textBuffer
+            )
+            if index.isMultiple(of: 16), Task.isCancelled { return nil }
+        }
+
+        guard !Task.isCancelled else { return nil }
+        var buffer = renderer.assembleFrame(
+            state: snapshot.state,
+            visibleItems: snapshot.visibleItems,
+            highlightPositions: highlightPositions,
+            context: snapshot.context,
+            buffer: textBuffer
+        )
+
+        var previewBounds: Bounds?
+        if snapshot.context.showSplitPreview, let manager = snapshot.previewManager {
+            let startRow = 3
+            let endRow = max(5, snapshot.context.rows) - 2
+            let listWidth = snapshot.context.cols / 2 - 1
+            let previewStartCol = listWidth + 2
+            let previewWidth = snapshot.context.cols - listWidth - 1
+            previewBounds = PreviewBounds(
+                startRow: startRow,
+                endRow: endRow,
+                startCol: previewStartCol,
+                endCol: snapshot.context.cols
+            )
+            buffer += manager.renderSplitPreview(
+                content: snapshot.previewContent,
+                scrollOffset: snapshot.previewScrollOffset,
+                startRow: startRow,
+                endRow: endRow,
+                startCol: previewStartCol,
+                width: previewWidth
+            )
+        } else if snapshot.context.showFloatingPreview, let manager = snapshot.previewManager {
+            let floating = manager.renderFloatingPreview(
+                content: snapshot.previewContent,
+                scrollOffset: snapshot.previewScrollOffset,
+                itemName: snapshot.selectedItemName,
+                rows: snapshot.context.rows,
+                cols: snapshot.context.cols
+            )
+            previewBounds = floating.bounds
+            buffer += floating.buffer
+        }
+
+        return RenderedFrame(buffer: buffer, previewBounds: previewBounds)
+    }
+}
+
 /// Main UI controller - event loop and rendering
 actor UIController {
     private let terminal: any Terminal
@@ -40,11 +128,12 @@ actor UIController {
     private var currentPreviewTask: Task<Void, Never>?
     private var fetchItemsTask: Task<Void, Never>?
     private var matchGeneration: UInt = 0
+    private var currentFrameTask: Task<RenderedFrame?, Never>?
+    private var renderGeneration: UInt = 0
 
     private var renderScheduled = false  // coalesces concurrent render requests
 
     private var mergerCache = MergerCache()
-    private var highlightResolver: HighlightResolver
 
     // Per-chunk result cache shared across TaskGroup partitions; internally locked.
     private let chunkCache = ChunkCache()
@@ -67,7 +156,6 @@ actor UIController {
 
         self.preview = PreviewState(command: previewCommand, useFloating: useFloatingPreview)
         self.renderer = UIRenderer(maxHeight: maxHeight, multiSelect: multiSelect)
-        self.highlightResolver = HighlightResolver(matcher: matcher)
         self.inputHandler = InputHandler(
             multiSelect: multiSelect,
             hasPreview: previewCommand != nil
@@ -91,7 +179,7 @@ actor UIController {
         state.updateMatches(initialMatches)
 
         refreshPreview()
-        await render()
+        await render(generation: renderGeneration)
 
         var lastRefresh = Date()
         let refreshIntervalFast: TimeInterval = 0.02
@@ -199,6 +287,7 @@ actor UIController {
         currentMatchTask?.cancel()
         currentPreviewTask?.cancel()
         fetchItemsTask?.cancel()
+        currentFrameTask?.cancel()
         debounceTask.cancel()
 
         await terminal.exitRawMode()
@@ -263,7 +352,7 @@ actor UIController {
         currentPreviewTask?.cancel()
         currentPreviewTask = Task {
             await self.updatePreviewAsync(manager: manager, command: command)
-            await self.render()
+            self.scheduleRender()
         }
     }
 
@@ -288,12 +377,18 @@ actor UIController {
     }
 
     private func scheduleRender() {
+        renderGeneration &+= 1
+        currentFrameTask?.cancel()
         guard !renderScheduled else { return }
         renderScheduled = true
 
         Task {
-            await render()
+            let generation = renderGeneration
+            await render(generation: generation)
             renderScheduled = false
+            if generation != renderGeneration {
+                scheduleRender()
+            }
         }
     }
 
@@ -328,7 +423,7 @@ actor UIController {
                   await applyMatchResults(cached, query: normalizedQuery, generation: generation)
             else { return }
             await refreshPreviewIfNeeded(results: cached)
-            await render()
+            await scheduleRender()
             return
         }
 
@@ -356,7 +451,7 @@ actor UIController {
 
         guard await applyMatchResults(results, query: normalizedQuery, generation: generation) else { return }
         await refreshPreviewIfNeeded(results: results)
-        await render()
+        await scheduleRender()
     }
 
     /// Update the cached preview when there are results to show.
@@ -401,7 +496,7 @@ actor UIController {
         mergerCache.invalidate()
     }
 
-    private func render() async {
+    private func render(generation: UInt) async {
         guard !isExiting else { return }
         let rawSize = (try? await terminal.getSize()) ?? (24, 80)
         let rows = max(5, rawSize.0)
@@ -410,17 +505,6 @@ actor UIController {
         // Layout: input | border | items… | status  →  4 rows of chrome
         let availableRows = rows - 4
         let displayHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
-
-        let previewWidth: Int
-        let previewStartCol: Int
-        if preview.showSplit {
-            let listWidth = cols / 2 - 1
-            previewWidth = cols - listWidth - 1
-            previewStartCol = listWidth + 2
-        } else {
-            previewWidth = 0
-            previewStartCol = 0
-        }
 
         let context = RenderContext(
             rows: rows,
@@ -439,36 +523,37 @@ actor UIController {
         // Materialise the visible window here; assembleFrame receives state
         // by value and cannot call mutating Merger methods itself.
         let visibleItems = state.merger.slice(state.scrollOffset, state.scrollOffset + displayHeight)
-        var highlightPositions: [Item.Index: [UInt16]] = [:]
-        highlightPositions.reserveCapacity(visibleItems.count)
-        for matchedItem in visibleItems {
-            highlightPositions[matchedItem.item.index] = highlightResolver.positions(
-                query: QueryNormalizer.normalizeForMatching(state.query),
-                item: matchedItem.item,
+        let selectedItemName = preview.showFloating
+            ? state.merger.get(state.selectedIndex).map { $0.item.text(in: textBuffer) } ?? ""
+            : ""
+        let snapshot = RenderSnapshot(
+            state: state,
+            visibleItems: visibleItems,
+            context: context,
+            previewManager: preview.manager,
+            previewContent: preview.cachedPreview,
+            previewScrollOffset: preview.scrollOffset,
+            selectedItemName: selectedItemName
+        )
+        let renderer = self.renderer
+        let matcher = self.matcher
+        let textBuffer = self.textBuffer
+        let frameTask = Task.detached(priority: .userInitiated) {
+            FrameBuilder.build(
+                snapshot: snapshot,
+                renderer: renderer,
+                matcher: matcher,
                 textBuffer: textBuffer
             )
         }
+        currentFrameTask = frameTask
+        guard let frame = await frameTask.value,
+              !isExiting,
+              generation == renderGeneration
+        else { return }
 
-        var buffer = renderer.assembleFrame(
-            state: state,
-            visibleItems: visibleItems,
-            highlightPositions: highlightPositions,
-            context: context,
-            buffer: textBuffer
-        )
-
-        if preview.showSplit {
-            let startRow = 3
-            let endRow = displayHeight + 2
-            buffer += preview.renderSplit(startRow: startRow, endRow: endRow, startCol: previewStartCol, width: previewWidth, cols: cols)
-        } else if preview.showFloating {
-            let itemName = state.merger.get(state.selectedIndex).map { $0.item.text(in: textBuffer) } ?? ""
-            buffer += preview.renderFloating(rows: rows, cols: cols, itemName: itemName)
-        } else {
-            preview.bounds = nil
-        }
-
-        await terminal.write(buffer)
+        preview.bounds = frame.previewBounds
+        await terminal.write(frame.buffer)
         await terminal.flush()
     }
 }

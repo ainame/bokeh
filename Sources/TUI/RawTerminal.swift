@@ -190,13 +190,9 @@ public actor RawTerminal: Terminal {
 
     /// Flushes terminal output buffer.
     public func flush() {
-        // Note: fsync on TTY may not be necessary but ensures output is visible
-        // Consider removing if performance is critical
-        if let fd = ttyFd {
-            fsync(fd.rawValue)
-        } else {
-            fsync(FileDescriptor.standardOutput.rawValue)
-        }
+        // Terminal writes are displayed by the terminal emulator without a
+        // filesystem flush. Avoid a synchronous fsync per interactive frame:
+        // it serialises keyboard reads and can make rapid typing feel laggy.
     }
 
     /// Reads terminal input and decodes semantic key events.
