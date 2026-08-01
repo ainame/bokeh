@@ -4,9 +4,18 @@ on:
   push:
     tags:
       - "*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-macos:
@@ -41,9 +50,43 @@ jobs:
           path: fltr-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
+  build-linux:
+    name: Build static Linux (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: "6.3.3"
+
+      - name: Install Swift Static Linux SDK
+        run: |
+          swift sdk install \
+            https://download.swift.org/swift-6.3.3-release/static-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
+            --checksum 87c3eaf908e67c0e13a84367119e12273cec1d2cd3d81f7d74bb36722d6b607b
+
+      - name: Build static release binary with mimalloc
+        run: ARCH=x86_64 make linux
+
+      - name: Verify static binary
+        run: file .build/x86_64-swift-linux-musl/release/fltr | grep -F "statically linked"
+
+      - name: Package binary
+        run: tar -C .build/x86_64-swift-linux-musl/release -czf fltr-linux-x86_64.tar.gz fltr
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: fltr-linux-x86_64
+          path: fltr-linux-x86_64.tar.gz
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub release
-    needs: build-macos
+    needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -51,13 +94,17 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create release and upload assets
+      - name: Create or update release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --verify-tag \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            dist/*.zip
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --clobber dist/*
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --title "${RELEASE_TAG}" \
+              --generate-notes \
+              dist/*
+          fi

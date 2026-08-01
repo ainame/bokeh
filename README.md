@@ -15,9 +15,9 @@ git branch | fltr
 
 ## Installation
 
-### mise (macOS)
+### mise
 
-Install the latest macOS release using mise's GitHub backend:
+Install the latest release using mise's GitHub backend:
 
 ```bash
 mise use -g github:ainame/fltr
@@ -26,10 +26,10 @@ mise use -g github:ainame/fltr
 To install this release specifically:
 
 ```bash
-mise use -g github:ainame/fltr@0.1
+mise use -g github:ainame/fltr@0.1.0
 ```
 
-mise selects the archive matching your Apple Silicon (`arm64`) or Intel (`x86_64`) Mac and places `fltr` on your PATH.
+mise selects the archive matching your Apple Silicon (`arm64`) or Intel (`x86_64`) Mac, or x86_64 Linux machine, and places `fltr` on your PATH.
 
 ### Local install (host platform)
 

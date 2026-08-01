@@ -3,16 +3,23 @@ set -euo pipefail
 
 MIMALLOC_VERSION="${MIMALLOC_VERSION:-3.0.10}"
 ARCH="${ARCH:-aarch64}"
+SWIFT_SDK_NAME="swift-6.3.3-RELEASE_static-linux-0.1.0"
+
+if command -v swiftly >/dev/null 2>&1 && [[ -f .swift-version ]]; then
+  SWIFT=(swiftly run swift)
+else
+  SWIFT=(swift)
+fi
 
 SWIFT_SDK_PATH="$({
-  swift sdk configure --show-configuration swift-6.2.3-RELEASE_static-linux-0.0.1 |
+  "${SWIFT[@]}" sdk configure --show-configuration "${SWIFT_SDK_NAME}" |
     grep "sdkRootPath:" |
     head -1 |
     awk '{print $2}'
 } || true)"
 
 if [[ -z "${SWIFT_SDK_PATH}" ]]; then
-  echo "Failed to resolve Swift SDK path for swift-6.2.3-RELEASE_static-linux-0.0.1" >&2
+  echo "Failed to resolve Swift SDK path for ${SWIFT_SDK_NAME}" >&2
   exit 1
 fi
 
@@ -48,7 +55,7 @@ if [[ ! -f "mimalloc-build-${ARCH}/libmimalloc.a" ]]; then
   rm -f ./*.o
 fi
 
-swift build -c release --product fltr --swift-sdk "${ARCH}-swift-linux-musl" \
+"${SWIFT[@]}" build -c release --product fltr --swift-sdk "${ARCH}-swift-linux-musl" \
   -Xlinker -z -Xlinker stack-size=0x80000 \
   -Xlinker --whole-archive \
   -Xlinker "./mimalloc-build-${ARCH}/libmimalloc.a" \
