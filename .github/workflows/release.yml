@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build release binary
+        run: swift build -c release --product fltr
+
+      - name: Package binary
+        run: |
+          chmod +x .build/release/fltr
+          ditto -c -k --sequesterRsrc --keepParent .build/release/fltr fltr-macos-${{ matrix.arch }}.zip
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: fltr-macos-${{ matrix.arch }}
+          path: fltr-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*.zip
