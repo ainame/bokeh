@@ -83,7 +83,11 @@ jobs:
           nm .build/x86_64-swift-linux-musl/release/fltr | grep -E '[[:space:]]mi_malloc$'
 
       - name: Package binary
-        run: tar -C .build/x86_64-swift-linux-musl/release -czf fltr-linux-x86_64.tar.gz fltr
+        run: |
+          mkdir dist
+          cp .build/x86_64-swift-linux-musl/release/fltr dist/fltr
+          cp LICENSES/mimalloc-MIT.txt dist/LICENSE-mimalloc.txt
+          tar -C dist -czf fltr-linux-x86_64.tar.gz fltr LICENSE-mimalloc.txt
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
