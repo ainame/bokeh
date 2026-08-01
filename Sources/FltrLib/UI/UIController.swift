@@ -248,7 +248,7 @@ actor UIController {
     }
 
     private func handleKey(key: Key) async {
-        let (rows, _) = (try? await terminal.getSize()) ?? (24, 80)
+        let (rows, cols) = (try? await terminal.getSize()) ?? (24, 80)
         let availableRows = rows - 4  // input + border + status + spacing
         let visibleHeight = maxHeight.map { min($0, availableRows) } ?? availableRows
 
@@ -265,12 +265,16 @@ actor UIController {
         switch action {
         case .none:
             if !state.shouldExit {
-                schedulePromptRender()
+                if key == .tab {
+                    scheduleRender()
+                } else {
+                    await renderPrompt(cols: cols)
+                }
             }
 
         case .scheduleMatchUpdate:
             scheduleMatchUpdate()
-            schedulePromptRender()
+            await renderPrompt(cols: cols)
 
         case .updatePreview:
             refreshPreview()
@@ -367,26 +371,19 @@ actor UIController {
         }
     }
 
-    /// Repaint only the prompt while a new search is running. This is the hot
-    /// typing path: it avoids full-frame construction and visible-row matching.
-    private func schedulePromptRender() {
+    /// Repaint only the prompt while a new search is running. This executes in
+    /// the current key action, avoiding an extra task-scheduling and terminal-
+    /// size round trip on the typing path.
+    private func renderPrompt(cols: Int) async {
         renderGeneration &+= 1
         currentFrameTask?.cancel()
-        let generation = renderGeneration
-        let query = state.query
-        let cursorPosition = state.cursorPosition
-        let renderer = self.renderer
-
-        Task {
-            let rawSize = (try? await terminal.getSize()) ?? (24, 80)
-            guard !isExiting, generation == renderGeneration else { return }
-            let prompt = renderer.renderInputLine(
-                query: query,
-                cursorPosition: cursorPosition,
-                cols: max(10, rawSize.1)
-            )
-            await terminal.write(prompt)
-        }
+        guard !isExiting else { return }
+        let prompt = renderer.renderInputLine(
+            query: state.query,
+            cursorPosition: state.cursorPosition,
+            cols: max(10, cols)
+        )
+        await terminal.write(prompt)
     }
 
     // MARK: - Matching
